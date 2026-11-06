@@ -9,13 +9,11 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.time.Duration
 import java.time.Instant
-import java.time.ZoneId
 
 /** Local explicit sleep-diary storage. Wearable sessions never enter this file. */
 object DiaryStore {
     const val FILE_NAME = "sleep_diary.json"
     private const val SCHEMA_VERSION = 1
-    private val seoul = ZoneId.of("Asia/Seoul")
 
     fun load(file: File): List<SleepRecord> {
         if (!file.isFile) return emptyList()
@@ -68,7 +66,9 @@ object DiaryStore {
         val observed = runCatching { Instant.parse(record.modifiedAt) }.getOrElse { throw IllegalArgumentException("입력 시각이 잘못됐어요.") }
         require(wake.isAfter(bed)) { "기상 시각은 취침 시각 이후여야 해요." }
         require(!observed.isBefore(wake)) { "입력 시각은 기상 시각 이전일 수 없어요." }
-        require(record.day == wake.atZone(seoul).toLocalDate().toString()) { "일지 날짜와 기상 날짜가 다릅니다." }
+        // `day` is the wake date in the device zone used when the diary was entered. Older rows were
+        // written in Asia/Seoul and must remain readable after travel; the absolute instants are canonical.
+        require(runCatching { java.time.LocalDate.parse(record.day) }.isSuccess) { "일지 날짜가 잘못됐습니다." }
         val timeInBed = Duration.between(bed, wake).toMinutes().toInt()
         require(record.durationMinutes == timeInBed) { "침대 체류시간이 취침·기상 구간과 다릅니다." }
         val latency = record.sleepLatencyMinutes

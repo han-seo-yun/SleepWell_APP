@@ -44,11 +44,9 @@ object PersonalizationStage {
 }
 
 internal object PredictionStatus {
-    private val seoul = ZoneId.of("Asia/Seoul")
-
-    /** 서로 다른 기상 날짜(KST) 수. 같은 날 낮잠·밤잠이 여러 개여도 하루로 센다. */
-    fun recordDays(records: List<SleepRecord>): Int =
-        records.map { Instant.ofEpochMilli(it.endMs).atZone(seoul).toLocalDate() }.distinct().size
+    /** 서로 다른 기기 시간대의 기상 날짜 수. 같은 날의 여러 기록은 하루로 센다. */
+    fun recordDays(records: List<SleepRecord>, calculationZone: ZoneId = ZoneId.of("Asia/Seoul")): Int =
+        records.map { Instant.ofEpochMilli(it.endMs).atZone(calculationZone).toLocalDate() }.distinct().size
 
     fun limitations(
         recordDays: Int,

@@ -15,7 +15,7 @@ import kotlin.math.absoluteValue
  *   - i번째 S는 (i-1)번째 epoch의 수면 여부로 [t(i-1), t(i)] 구간 계산
  *
  * Process C_sleep (일주기 리듬, 시계 시각 기준):
- *   - clockH = epoch 시각(Asia/Seoul)의 시 + 분/60 + 초/3600
+ *   - clockH = epoch 시각을 계산 시간대로 바꾼 시 + 분/60 + 초/3600
  *   - phaseRef = 연속 수면 구간(bout) 중간 시각(시계 시각)의 원형 평균
  *   - C_sleep = amplitude * cos(2π * (clockH - phaseRef) / 24)
  *   - 수면 중간 시각에서 +최대(수면 쪽), 반대편에서 -최대
@@ -43,12 +43,13 @@ object TwoProcessModel {
      * epoch 타임라인으로부터 S, C_sleep, sleepPropensity 시계열과 현재 값을 계산.
      *
      * - i번째 S는 (i-1)번째 epoch의 수면 여부로 [t(i-1), t(i)] 구간 계산
-     * - C는 시계 시각(Asia/Seoul) 기준, phaseRef는 수면 bout 중간 시각의 원형 평균
+     * - C는 계산 시간대의 시계 시각 기준, phaseRef는 수면 bout 중간 시각의 원형 평균
      * - epoch 0: S = INITIAL_S, C는 epoch 0의 clockH 기준 (S 업데이트 전 기록)
      */
     fun compute(
         timestampsMs: List<Long>,
-        isSleep: List<Boolean>
+        isSleep: List<Boolean>,
+        calculationZone: ZoneId = ZoneId.of("Asia/Seoul")
     ): ProcessSCOutput {
         if (timestampsMs.isEmpty()) {
             return ProcessSCOutput(
@@ -61,7 +62,7 @@ object TwoProcessModel {
         }
 
         // phaseRef 계산: 수면 bout 중간 시각(clockH)의 원형 평균
-        val phaseRef = calculatePhaseRef(timestampsMs, isSleep)
+        val phaseRef = calculatePhaseRef(timestampsMs, isSleep, calculationZone)
 
         val history = mutableListOf<SCPoint>()
         var s = INITIAL_S
@@ -70,7 +71,7 @@ object TwoProcessModel {
         for (i in timestampsMs.indices) {
             val tsMs = timestampsMs[i]
             val sleeping = isSleep[i]
-            val clockH = clockHours(tsMs)
+            val clockH = clockHours(tsMs, calculationZone)
 
             // epoch 간격 (시간) — i=0이면 0, i≥1이면 [t(i-1), t(i)]
             val dtH = if (i > 0) {
@@ -103,7 +104,7 @@ object TwoProcessModel {
         }
 
         val lastTimestampMs = timestampsMs.last()
-        val lastClockH = clockHours(lastTimestampMs)
+        val lastClockH = clockHours(lastTimestampMs, calculationZone)
         val finalCSleep = AMPLITUDE * cos(2.0 * PI * (lastClockH - phaseRef) / TAU_C_HOURS)
         val finalS = s
         val finalPropensity = finalS + finalCSleep
@@ -128,7 +129,8 @@ object TwoProcessModel {
         lastS: Double,
         lastTimestampMs: Long,
         phaseRef: Double,
-        futureIntervalMin: Int = 15
+        futureIntervalMin: Int = 15,
+        calculationZone: ZoneId = ZoneId.of("Asia/Seoul")
     ): List<FutureSPoint> {
         val result = mutableListOf<FutureSPoint>()
         val intervalMs = futureIntervalMin * 60_000L
@@ -137,7 +139,7 @@ object TwoProcessModel {
 
         var cursor = lastTimestampMs
         while (cursor < lastTimestampMs + thresholdMs) {
-            val clockH = clockHours(cursor)
+            val clockH = clockHours(cursor, calculationZone)
             val cSleep = AMPLITUDE * cos(2.0 * PI * (clockH - phaseRef) / TAU_C_HOURS)
 
             result.add(FutureSPoint(
@@ -160,7 +162,7 @@ object TwoProcessModel {
     // ────────────────────────────────────────────────
 
     /**
-     * epoch timestamp(ms)의 Asia/Seoul 시계 시각(hour).
+     * epoch timestamp(ms)의 계산 시간대 시계 시각(hour).
      * clockH = 시 + 분/60 + 초/3600
      *
      * [통합 수정 2026-10-02 소빈 반영 — 원래 2026-09-25 지적]
@@ -171,9 +173,8 @@ object TwoProcessModel {
      * 실측(5/5 불일치): 12:24 → 저장소형 12.000000 / 정상 12.400000, 12:24:30 → 12.408333
      * 연산자를 줄 **끝**에 두어야 이어진 식이 된다. 아래 형태가 그걸 한다.
      */
-    private fun clockHours(tsMs: Long): Double {
+    private fun clockHours(tsMs: Long, zone: ZoneId): Double {
         val instant = Instant.ofEpochMilli(tsMs)
-        val zone = ZoneId.of("Asia/Seoul")
         val local = instant.atZone(zone)
         return local.hour.toDouble() +
             local.minute.toDouble() / 60.0 +
@@ -188,7 +189,7 @@ object TwoProcessModel {
      * - 원형 평균: mean_sin = Σ sin(h*2π/24) / n, mean_cos = Σ cos(h*2π/24) / n
      *   phaseRef = atan2(mean_sin, mean_cos) * 24 / (2π)
      */
-    private fun calculatePhaseRef(timestampsMs: List<Long>, isSleep: List<Boolean>): Double {
+    private fun calculatePhaseRef(timestampsMs: List<Long>, isSleep: List<Boolean>, calculationZone: ZoneId): Double {
         // 수면 bout 찾기 (연속된 isSleep=true 구간)
         val boutMidpointsH = mutableListOf<Double>()
         var inBout = false
@@ -204,7 +205,7 @@ object TwoProcessModel {
                 if (inBout) {
                     val boutEndTs = timestampsMs[i - 1]   // 마지막 수면 epoch (기준 코드와 동일)
                     val midTs = (boutStartTs!! + boutEndTs) / 2
-                    boutMidpointsH.add(clockHours(midTs))
+                    boutMidpointsH.add(clockHours(midTs, calculationZone))
                     boutStartTs = null
                     inBout = false
                 }
@@ -214,7 +215,7 @@ object TwoProcessModel {
         if (inBout && boutStartTs != null) {
             val lastTs = timestampsMs.last()
             val midTs = (boutStartTs + lastTs) / 2
-            boutMidpointsH.add(clockHours(midTs))
+            boutMidpointsH.add(clockHours(midTs, calculationZone))
         }
 
         if (boutMidpointsH.isEmpty()) {

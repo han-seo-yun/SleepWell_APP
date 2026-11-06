@@ -312,7 +312,7 @@ fun AnalysisScreen() {
                             historyNights = SleepHistoryUi.load(context, analysisNow)
                             analysisSource = if (historyNights.isEmpty()) "입력한 수면 습관 (반영 가능한 주 수면 기록 없음)"
                                 else historyNights.map { it.sourceLabel }.distinct().joinToString(" · ")
-                            val features = survey?.featureValues(SurveyCsv.SURVEY_ZONE) ?: emptyMap()
+                            val features = survey?.featureValues() ?: emptyMap()
                             frozenInput = if (fileReady && uploaded.isFile) SavedSnapshot.captureInput(context.filesDir, uploaded) else null
                             frozenModelInputs = ModelInputs.capture()
                             val sensorResult = frozenInput?.let { AnalysisRunner.runFile(it.file, direct, features) }
@@ -381,7 +381,7 @@ fun AnalysisScreen() {
             val prior = restoredSurvey
             val all = SurveyStore.saveRestoredEdit(surveyFile, parsed.survey?.copy(participant = "me"),
                 prior?.context, prior?.sleepSupplement,
-                emptyEditContextDate = NextNightModel.liveNightId(Instant.now().atZone(java.time.ZoneId.of("Asia/Seoul")), NextNightModel.profile.usualWake).toString(),
+                emptyEditContextDate = NextNightModel.liveNightId(Instant.now().atZone(java.time.ZoneId.of(zone.zoneId)), NextNightModel.profile.usualWake).toString(),
                 emptyEditSleepWakeDate = form.sleepWakeDate)
             surveyNote = "입력을 저장했어요 · 저장한 응답 ${all.count { it.participant == "me" }}개"
             formDirty = false
@@ -561,7 +561,7 @@ fun AnalysisScreen() {
         }
     }
     val liveFormNight = NextNightModel.liveNightId(
-        Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.of("Asia/Seoul")), profile.usualWake).toString()
+        Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.of(zone.zoneId)), profile.usualWake).toString()
     LaunchedEffect(importedNights, liveFormNight, zone, restoreRevision, form.sleepWakeDate) {
         run {
             val chosenSleep = form.sleepWakeDate ?: if (!manualEntry && !formDirty) importedNights.maxByOrNull { it.wakeTime }
@@ -602,9 +602,10 @@ fun AnalysisScreen() {
                 val who = "me"
                 val observedSurvey = withContext(Dispatchers.IO) {
                     val saved = try { SurveyStore.load(surveyFile) } catch (_: Exception) { emptyList() }
-                    SurveyObservationPolicy.currentNight(saved, who, Instant.ofEpochMilli(nowMs), profile.usualWake)
+                    SurveyObservationPolicy.currentNight(saved, who, Instant.ofEpochMilli(nowMs), profile.usualWake,
+                        java.time.ZoneId.of(zone.zoneId))
                 }
-                val liveNightId = NextNightModel.liveNightId(Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.of("Asia/Seoul")), profile.usualWake).toString()
+                val liveNightId = NextNightModel.liveNightId(Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.of(zone.zoneId)), profile.usualWake).toString()
                 // A just-entered transient survey remains usable if persistence failed; persisted revisions always
                 // win and are accepted only when their real savedAt is not in the future.
                 val liveSurvey = observedSurvey?.survey ?: c.survey?.takeIf { it.date == liveNightId }
@@ -614,7 +615,7 @@ fun AnalysisScreen() {
                 val liveComputed = withContext(Dispatchers.Default) {
                     synchronized(NextNightModel) {
                     val live = AnalysisRunner.runCurrent(
-                        c.input?.file ?: uploaded, base, liveDirect, liveSurvey?.featureValues(SurveyCsv.SURVEY_ZONE) ?: emptyMap(), nowMs,
+                        c.input?.file ?: uploaded, base, liveDirect, liveSurvey?.featureValues() ?: emptyMap(), nowMs,
                         contextObservedAtMs = observedSurvey?.observedAt?.toEpochMilli()
                     )
                     Computed(live, liveDirect, liveSurvey?.fatigue, liveSurvey, c.input, ModelInputs.capture(), c.source)
@@ -631,8 +632,9 @@ fun AnalysisScreen() {
             val allSurveys = withContext(Dispatchers.IO) {
                 try { SurveyStore.load(surveyFile) } catch (e: Exception) { emptyList<SurveyDay>() }
             }.filter { it.participant == who }
-            val historicalNightId = SurveyCsv.surveyDateFor(sel.basisMs)
-            val historicalCutoffMs = SurveyObservationPolicy.historicalCutoffMs(historicalNightId)
+            val evaluationZone = java.time.ZoneId.of(zone.zoneId)
+            val historicalNightId = SurveyCsv.surveyDateFor(sel.basisMs, zone.tz)
+            val historicalCutoffMs = SurveyObservationPolicy.historicalCutoffMs(historicalNightId, evaluationZone)
             val csvDateCutoffMs = app.sleepwell.analysis.HistoricalCsvReanalysis.dataCutoffMs(
                 sel.basisMs, java.time.ZoneId.of(zone.zoneId), historicalCutoffMs)
             val csvReanalysis = reanalysisCandidates.any {
@@ -643,7 +645,7 @@ fun AnalysisScreen() {
             val historicalSurveys = if (csvReanalysis) allSurveys.filter { row ->
                 row.savedAt?.let { runCatching { Instant.parse(it).toEpochMilli() < inputCutoffMs }.getOrDefault(false) } == true
             } else allSurveys
-            val observedSurvey = SurveyObservationPolicy.historicalNight(historicalSurveys, who, historicalNightId)
+            val observedSurvey = SurveyObservationPolicy.historicalNight(historicalSurveys, who, historicalNightId, evaluationZone)
             val daySurvey = observedSurvey?.survey
             displayedSurvey = daySurvey
             val target = daySurvey?.nextAlarmAfter(Instant.ofEpochMilli(sel.basisMs + DirectInputParser.MIN_WAKE_GAP_MS))?.toEpochMilli()
@@ -661,7 +663,7 @@ fun AnalysisScreen() {
                 val historicalImports = ImportedSleepStore.withQuestionnairesBefore(
                     reanalysisCandidates, historicalSurveys, Instant.ofEpochMilli(inputCutoffMs))
                 val inputs = ModelInputs.capture().copy(imports = historicalImports)
-                val features = daySurvey?.featureValues(SurveyCsv.SURVEY_ZONE) ?: emptyMap()
+                val features = daySurvey?.featureValues() ?: emptyMap()
                 val result = if (c.input != null) AnalysisRunner.runFileAt(
                     c.input.file, pastDirect, sel.basisMs, sleepTarget, features,
                     recommendationTimeMs = historicalCutoffMs,

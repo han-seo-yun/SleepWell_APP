@@ -12,7 +12,7 @@ import java.time.ZoneId
  * This is a reanalysis of today's CSV and profile, not a forecast the app made in the past.
  */
 internal object HistoricalCsvReanalysis {
-    /** Keep the frozen KST decision time, but never borrow sleep from the next displayed date. */
+    /** Keep the evaluation zone's 20:00 decision time, but never borrow sleep from the next displayed date. */
     fun dataCutoffMs(referenceMs: Long, displayZone: ZoneId, modelCutoffMs: Long): Long {
         val nextDate = Instant.ofEpochMilli(referenceMs).atZone(displayZone).toLocalDate().plusDays(1)
             .atStartOfDay(displayZone).toInstant().toEpochMilli()

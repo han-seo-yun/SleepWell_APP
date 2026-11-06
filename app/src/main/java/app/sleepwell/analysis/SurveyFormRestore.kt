@@ -26,7 +26,7 @@ object SurveyFormRestore {
         sleepWakeDate: String? = null,
         usualWake: String = NextNightModel.profile.usualWake
     ): Restored {
-        val observed = SurveyObservationPolicy.currentNight(days, participant, now, usualWake)
+        val observed = SurveyObservationPolicy.currentNight(days, participant, now, usualWake, displayZone)
         val context = observed?.survey
         val supplement = sleepWakeDate?.let { wakeDate ->
             days.asSequence()

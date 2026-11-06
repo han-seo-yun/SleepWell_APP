@@ -13,8 +13,8 @@ android {
         // 서윤 언니 팀 repo(2026-10-07)와 맞춤: Samsung Health Data SDK 실기기 조건
         minSdk = 29
         targetSdk = 37
-        versionCode = 9
-        versionName = "0.8.1"
+        versionCode = 10
+        versionName = "0.8.2"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 

@@ -20,7 +20,7 @@ object ResearchBaselines {
     const val VERSION = "android-research-baselines-v1"
     const val MODEL_IDENTIFIER = "research_comparator_only_no_recommendation"
     const val PROFILE_ASSUMPTION = "user_profile_assumption_not_cohort_train_population_prior"
-    private val ZONE: ZoneId = ZoneId.of("Asia/Seoul")
+    private val DEFAULT_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
     private val MANUAL = setOf("manual", "diary", "user_entry")
 
     data class Prediction(
@@ -54,7 +54,7 @@ object ResearchBaselines {
             .put("cutoff", cutoff.toString())
             .put("model_identifier", MODEL_IDENTIFIER)
             .put("history_count", historyCount)
-            .put("history_policy", "manual only; wake and modified_at strictly before cutoff; latest version per KST wake date")
+            .put("history_policy", "manual only; wake and modified_at strictly before cutoff; latest version per evaluation-zone wake date")
             .put("profile_fallback_role", PROFILE_ASSUMPTION)
             .put("baselines", JSONObject().also { output ->
                 predictions.forEach { (name, prediction) -> output.put(name, prediction.toJson()) }
@@ -74,11 +74,12 @@ object ResearchBaselines {
         profile: UserProfile,
         records: List<SleepRecord>,
         cutoff: Instant,
-        context: DailyContext?
+        context: DailyContext?,
+        calculationZone: ZoneId = DEFAULT_ZONE
     ): Snapshot {
-        val cutoffLocal = cutoff.atZone(ZONE)
+        val cutoffLocal = cutoff.atZone(calculationZone)
         val profilePrediction = profilePrediction(profile)
-        val rows = history(records, profile.createdAt, cutoffLocal)
+        val rows = history(records, profile.createdAt, cutoffLocal, calculationZone)
         val windows = listOf(7L, 14L, 28L).associateWith { days ->
             rows.filter { !it.wake.isBefore(cutoffLocal.minusDays(days)) }
         }
@@ -129,7 +130,7 @@ object ResearchBaselines {
         val daytypePrediction = if (daytype.isEmpty()) {
             fallback("matching_target_weekday_or_weekend_within_28_calendar_days")
         } else arithmetic("matching_target_weekday_or_weekend_within_28_calendar_days", daytype)
-        val schedule = schedulePrediction(profile, cutoffLocal, context)
+        val schedule = schedulePrediction(profile, cutoffLocal, context, calculationZone)
 
         val predictions = linkedMapOf(
             "profile_clock_assumption" to projected(profilePrediction.first, profilePrediction.second,
@@ -146,16 +147,21 @@ object ResearchBaselines {
         return Snapshot(cutoff, rows.size, predictions)
     }
 
-    private fun history(records: List<SleepRecord>, createdAt: String, cutoff: ZonedDateTime): List<Row> {
-        val enrollment = runCatching { Instant.parse(createdAt).atZone(ZONE) }.getOrNull()
+    private fun history(
+        records: List<SleepRecord>,
+        createdAt: String,
+        cutoff: ZonedDateTime,
+        calculationZone: ZoneId
+    ): List<Row> {
+        val enrollment = runCatching { Instant.parse(createdAt).atZone(calculationZone) }.getOrNull()
             ?: return emptyList()
         val latest = mutableMapOf<String, Row>()
         records.forEach { record ->
             if (record.source.lowercase() !in MANUAL) return@forEach
             runCatching {
-                val bed = Instant.parse(record.bedtime).atZone(ZONE)
-                val wake = Instant.parse(record.wakeTime).atZone(ZONE)
-                val observed = Instant.parse(record.modifiedAt).atZone(ZONE)
+                val bed = Instant.parse(record.bedtime).atZone(calculationZone)
+                val wake = Instant.parse(record.wakeTime).atZone(calculationZone)
+                val observed = Instant.parse(record.modifiedAt).atZone(calculationZone)
                 val duration = Duration.between(bed, wake).toMinutes()
                 if (!bed.isBefore(wake) || !wake.isBefore(cutoff) || !observed.isBefore(cutoff) ||
                     wake.isBefore(enrollment) || duration !in 30..960) return@runCatching
@@ -179,17 +185,22 @@ object ResearchBaselines {
         return project(onset, wake)
     }
 
-    private fun schedulePrediction(profile: UserProfile, cutoff: ZonedDateTime, context: DailyContext?): Prediction {
+    private fun schedulePrediction(
+        profile: UserProfile,
+        cutoff: ZonedDateTime,
+        context: DailyContext?,
+        calculationZone: ZoneId
+    ): Prediction {
         if (context == null) return Prediction(false, method = "next_day_first_schedule_minus_preparation_with_profile_duration",
             reason = "no_schedule_context")
-        val observed = runCatching { Instant.parse(context.observedAt).atZone(ZONE) }.getOrNull()
+        val observed = runCatching { Instant.parse(context.observedAt).atZone(calculationZone) }.getOrNull()
             ?: return Prediction(false, method = "next_day_first_schedule_minus_preparation_with_profile_duration",
                 reason = "invalid_context_observed_at")
         if (context.nightId != cutoff.toLocalDate().toString() || observed.isAfter(cutoff)) {
             return Prediction(false, method = "next_day_first_schedule_minus_preparation_with_profile_duration",
                 reason = "context_not_available_by_cutoff")
         }
-        val first = context.firstStart?.let { runCatching { Instant.parse(it).atZone(ZONE) }.getOrNull() }
+        val first = context.firstStart?.let { runCatching { Instant.parse(it).atZone(calculationZone) }.getOrNull() }
             ?: return Prediction(false, method = "next_day_first_schedule_minus_preparation_with_profile_duration",
                 reason = "no_next_day_first_schedule")
         if (first.toLocalDate() != cutoff.plusDays(1).toLocalDate() || !first.isAfter(cutoff) || first.isAfter(cutoff.plusHours(36))) {

@@ -27,10 +27,17 @@ import kotlin.math.sqrt
  * does not turn their predicted behaviour into a clinical recommendation.
  */
 internal class PortableFusionModel private constructor(
-    private val assetLoader: (String) -> ByteArray
+    private val assetLoader: (String) -> ByteArray,
+    private val calculationZone: ZoneId
 ) {
-    constructor(context: Context) : this({ path -> context.assets.open(path).use { it.readBytes() } })
-    internal constructor(loader: (String) -> ByteArray, testable: Boolean = true) : this(loader)
+    constructor(context: Context, calculationZone: ZoneId = DEFAULT_ZONE) : this(
+        { path -> context.assets.open(path).use { it.readBytes() } }, calculationZone
+    )
+    internal constructor(
+        loader: (String) -> ByteArray,
+        testable: Boolean = true,
+        calculationZone: ZoneId = DEFAULT_ZONE
+    ) : this(loader, calculationZone)
     companion object {
         const val MODEL_VERSION = "robust-next-night-research-v2"
         const val RUNTIME_MODEL_VERSION = "robust-next-night-research-v2+gradual_v1"
@@ -46,7 +53,7 @@ internal class PortableFusionModel private constructor(
         private const val TAU_WAKE = 18.2
         private const val TAU_SLEEP = 4.2
         private const val C_AMPLITUDE = 0.15
-        private val SEOUL: ZoneId = ZoneId.of("Asia/Seoul")
+        private val DEFAULT_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
         private val EXPECTED_HASHES = mapOf(
             "cmi" to "add8ba4e23f9c4c9337b821406386664a054580d86c6e53c9b5e6f189bdfa2c7",
             "mesa" to "757b939d756c9174eab9304e0d8e872f4ed9eeae34e99a3d921f29284207c620"
@@ -79,64 +86,70 @@ internal class PortableFusionModel private constructor(
     }
 
     init {
-        // Exported by the Python reference implementation.  This makes the
-        // deployed provider fail closed if arithmetic or JSON traversal drifts.
-        // These fixed values belong to the frozen legacy14 artifact evaluation;
-        // runtime gradual_v1 parity is covered by instrumentation golden fixtures.
-        val reference = predict(
-            UserProfile("30-44", "any", 0, "23:00", "07:00", 480, "2026-10-01T00:00:00Z"),
-            emptyList(),
-            ZonedDateTime.of(2026, 10, 20, 20, 0, 0, 0, SEOUL),
-            PersonalizationPolicy.LEGACY14
-        ).predictions
-        val expected = mapOf(
-            "physical_cmi" to (180.0 to 690.0),
-            "data_cmi" to (161.1637500487975 to 665.6572048847543),
-            "hybrid_cmi" to (142.04257940157947 to 657.8397106761714),
-            "physical_mesa" to (235.0 to 655.0),
-            "data_mesa" to (186.31527801819936 to 639.8916827710668),
-            "hybrid_mesa" to (186.4741883478474 to 640.3517720155231)
-        )
-        expected.forEach { (name, pair) ->
-            val actual = reference.getJSONObject(name)
-            require(kotlin.math.abs(actual.getDouble("onset_offset_min") - pair.first) <= 1e-7 &&
-                kotlin.math.abs(actual.getDouble("wake_offset_min") - pair.second) <= 1e-7) {
-                "Python 기준 예측과 Android 계산이 일치하지 않습니다: $name " +
-                    "actual=${actual.getDouble("onset_offset_min")},${actual.getDouble("wake_offset_min")} expected=$pair"
-            }
-        }
-        val history = (0 until 16).map { index ->
-            val day = ZonedDateTime.of(2026, 10, 20, 20, 0, 0, 0, SEOUL).minusDays((17 - index).toLong())
-            val bed = day.withHour(22 + index % 2).withMinute((index * 7) % 50)
-            val wake = day.plusDays(1).withHour(6 + index % 3).withMinute((index * 11) % 50)
-            SleepRecord(
-                id = "reference:$index", day = wake.toLocalDate().toString(),
-                bedtime = bed.toInstant().toString(), wakeTime = wake.toInstant().toString(),
-                durationMinutes = Duration.between(bed, wake).toMinutes().toInt(),
-                rested = 3, fatigue = 3, source = "diary",
-                modifiedAt = wake.plusMinutes(30).toInstant().toString()
+        if (calculationZone != DEFAULT_ZONE) {
+            // The exported arithmetic goldens are KST fixtures. Validate them in their fixed
+            // reference zone even when runtime wall-clock features use the device zone.
+            PortableFusionModel(assetLoader, DEFAULT_ZONE)
+        } else {
+            // Exported by the Python reference implementation.  This makes the
+            // deployed provider fail closed if arithmetic or JSON traversal drifts.
+            // These fixed values belong to the frozen legacy14 artifact evaluation;
+            // runtime gradual_v1 parity is covered by instrumentation golden fixtures.
+            val reference = predict(
+                UserProfile("30-44", "any", 0, "23:00", "07:00", 480, "2026-10-01T00:00:00Z"),
+                emptyList(),
+                ZonedDateTime.of(2026, 10, 20, 20, 0, 0, 0, DEFAULT_ZONE),
+                PersonalizationPolicy.LEGACY14
+            ).predictions
+            val expected = mapOf(
+                "physical_cmi" to (180.0 to 690.0),
+                "data_cmi" to (161.1637500487975 to 665.6572048847543),
+                "hybrid_cmi" to (142.04257940157947 to 657.8397106761714),
+                "physical_mesa" to (235.0 to 655.0),
+                "data_mesa" to (186.31527801819936 to 639.8916827710668),
+                "hybrid_mesa" to (186.4741883478474 to 640.3517720155231)
             )
-        }
-        val historyReference = predict(
-            UserProfile("30-44", "any", 0, "23:00", "07:00", 480, "2026-09-19T15:00:00Z"),
-            history,
-            ZonedDateTime.of(2026, 10, 20, 20, 0, 0, 0, SEOUL),
-            PersonalizationPolicy.LEGACY14
-        ).predictions
-        val historyExpected = mapOf(
-            "physical_cmi" to (175.0 to 685.0),
-            "data_cmi" to (158.49808237468034 to 669.1552490375618),
-            "hybrid_cmi" to (169.2404151431544 to 668.1009950350582),
-            "physical_mesa" to (200.0 to 670.0),
-            "data_mesa" to (182.47331222730517 to 676.2566882412182),
-            "hybrid_mesa" to (181.20284809608705 to 678.8183100370821)
-        )
-        historyExpected.forEach { (name, pair) ->
-            val actual = historyReference.getJSONObject(name)
-            require(kotlin.math.abs(actual.getDouble("onset_offset_min") - pair.first) <= 1e-7 &&
-                kotlin.math.abs(actual.getDouble("wake_offset_min") - pair.second) <= 1e-7) {
-                "개인화 Python 기준 예측과 Android 계산이 일치하지 않습니다: $name " +
-                    "actual=${actual.getDouble("onset_offset_min")},${actual.getDouble("wake_offset_min")} expected=$pair"
+            expected.forEach { (name, pair) ->
+                val actual = reference.getJSONObject(name)
+                require(kotlin.math.abs(actual.getDouble("onset_offset_min") - pair.first) <= 1e-7 &&
+                    kotlin.math.abs(actual.getDouble("wake_offset_min") - pair.second) <= 1e-7) {
+                    "Python 기준 예측과 Android 계산이 일치하지 않습니다: $name " +
+                        "actual=${actual.getDouble("onset_offset_min")},${actual.getDouble("wake_offset_min")} expected=$pair"
+                }
+            }
+            val history = (0 until 16).map { index ->
+                val day = ZonedDateTime.of(2026, 10, 20, 20, 0, 0, 0, DEFAULT_ZONE).minusDays((17 - index).toLong())
+                val bed = day.withHour(22 + index % 2).withMinute((index * 7) % 50)
+                val wake = day.plusDays(1).withHour(6 + index % 3).withMinute((index * 11) % 50)
+                SleepRecord(
+                    id = "reference:$index", day = wake.toLocalDate().toString(),
+                    bedtime = bed.toInstant().toString(), wakeTime = wake.toInstant().toString(),
+                    durationMinutes = Duration.between(bed, wake).toMinutes().toInt(),
+                    rested = 3, fatigue = 3, source = "diary",
+                    modifiedAt = wake.plusMinutes(30).toInstant().toString()
+                )
+            }
+            val historyReference = predict(
+                UserProfile("30-44", "any", 0, "23:00", "07:00", 480, "2026-09-19T15:00:00Z"),
+                history,
+                ZonedDateTime.of(2026, 10, 20, 20, 0, 0, 0, DEFAULT_ZONE),
+                PersonalizationPolicy.LEGACY14
+            ).predictions
+            val historyExpected = mapOf(
+                "physical_cmi" to (175.0 to 685.0),
+                "data_cmi" to (158.49808237468034 to 669.1552490375618),
+                "hybrid_cmi" to (169.2404151431544 to 668.1009950350582),
+                "physical_mesa" to (200.0 to 670.0),
+                "data_mesa" to (182.47331222730517 to 676.2566882412182),
+                "hybrid_mesa" to (181.20284809608705 to 678.8183100370821)
+            )
+            historyExpected.forEach { (name, pair) ->
+                val actual = historyReference.getJSONObject(name)
+                require(kotlin.math.abs(actual.getDouble("onset_offset_min") - pair.first) <= 1e-7 &&
+                    kotlin.math.abs(actual.getDouble("wake_offset_min") - pair.second) <= 1e-7) {
+                    "개인화 Python 기준 예측과 Android 계산이 일치하지 않습니다: $name " +
+                        "actual=${actual.getDouble("onset_offset_min")},${actual.getDouble("wake_offset_min")} expected=$pair"
+                }
             }
         }
     }
@@ -168,8 +181,7 @@ internal class PortableFusionModel private constructor(
         inputPolicy: SleepInputPolicy = SleepInputPolicy.DIARY_ONLY,
         observedThrough: Instant? = null
     ): Result {
-        require(cutoff.zone == SEOUL || cutoff.withZoneSameInstant(SEOUL).zone == SEOUL)
-        val localCutoff = cutoff.withZoneSameInstant(SEOUL)
+        val localCutoff = cutoff.withZoneSameInstant(calculationZone)
         require(localCutoff.toLocalTime() == LocalTime.of(20, 0)) { "예측 기준은 20:00이어야 합니다." }
         val runtimeModelVersion = when {
             inputPolicy == SleepInputPolicy.DIARY_AND_WEARABLE_V1 -> WEARABLE_RUNTIME_MODEL_VERSION
@@ -541,11 +553,11 @@ internal class PortableFusionModel private constructor(
         C_AMPLITUDE * cos(2 * PI * (minute(time) - phase) / 1440.0)
 
     private fun cutoffForOnset(onset: ZonedDateTime): ZonedDateTime {
-        val sameDay = onset.toLocalDate().atTime(20, 0).atZone(SEOUL)
+        val sameDay = onset.toLocalDate().atTime(20, 0).atZone(calculationZone)
         return if (!onset.isBefore(sameDay)) sameDay else sameDay.minusDays(1)
     }
 
-    private fun parseTime(value: String): ZonedDateTime = Instant.parse(value).atZone(SEOUL)
+    private fun parseTime(value: String): ZonedDateTime = Instant.parse(value).atZone(calculationZone)
     private fun secondsBetween(start: ZonedDateTime, end: ZonedDateTime): Double {
         val duration = Duration.between(start, end)
         return duration.seconds + duration.nano / 1_000_000_000.0

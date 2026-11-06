@@ -10,6 +10,7 @@ import app.sleepwell.user.MeasurementRecommendationPolicy
 import app.sleepwell.user.PortableFusionModel
 import app.sleepwell.user.SleepInputPolicy
 import app.sleepwell.user.UserModelEngine
+import app.sleepwell.health.DisplaySettings
 import app.sleepwell.user.UserProfile
 import org.json.JSONObject
 import java.time.Instant
@@ -56,7 +57,8 @@ object NextNightModel {
         val onboardingCompleted: Boolean = false
     )
 
-    private val SEOUL: ZoneId = ZoneId.of("Asia/Seoul")
+    @Volatile private var calculationZone: ZoneId = ZoneId.of("Asia/Seoul")
+    private var installedAssetLoader: ((String) -> ByteArray)? = null
 
     /**
      * 그동안 쌓인 설문 (지금 데이터의 참여자 것만: 실제 = "me", 합성 = "Test"). 화면이 계산 전에 넣어 준다.
@@ -82,13 +84,32 @@ object NextNightModel {
         private set
 
     /** 앱 시작 때 한 번: assets/models/ 를 읽는 함수만 넘긴다 (MainActivity). 테스트에서는 파일 읽기로 넘긴다 */
-    fun install(assetLoader: (String) -> ByteArray) {
-        engine = UserModelEngine(assetLoader)
+    fun install(assetLoader: (String) -> ByteArray) =
+        install(assetLoader, ZoneId.of(DisplaySettings.zone.zoneId))
+
+    @Synchronized
+    fun install(assetLoader: (String) -> ByteArray, zoneId: ZoneId) {
+        val candidate = UserModelEngine(assetLoader, calculationZone = zoneId)
+        installedAssetLoader = assetLoader
+        calculationZone = zoneId
+        engine = candidate
     }
+
+    /** Rebuild the lightweight runtime when Android reports a device-time-zone change. */
+    @Synchronized
+    fun refreshCalculationZone(zoneId: ZoneId = ZoneId.of(DisplaySettings.zone.zoneId)) {
+        if (zoneId == calculationZone) return
+        val candidate = installedAssetLoader?.let { UserModelEngine(it, calculationZone = zoneId) }
+        calculationZone = zoneId
+        if (candidate != null) engine = candidate
+    }
+
+    internal fun currentCalculationZone(): ZoneId = calculationZone
 
     val isInstalled: Boolean get() = engine != null
 
     /** 파이프라인 결과의 예상·권장(옛 HybridRecommendationEngine 값)을 새 엔진 값으로 바꾼다 */
+    @Synchronized
     fun applyTo(
         result: AnalysisResult,
         direct: DirectInput?,
@@ -109,9 +130,9 @@ object NextNightModel {
         }
         val eng = engine ?: return result
         val refMs = result.inputPeriodEndMs.takeIf { it > 0 } ?: return result
-        val decisionTime = nowMs?.let { Instant.ofEpochMilli(it).atZone(SEOUL) }
-            ?: Instant.ofEpochMilli(refMs).atZone(SEOUL).toLocalDate().atTime(20, 0).atZone(SEOUL)
-        val cutoff = decisionTime.toLocalDate().atTime(20, 0).atZone(SEOUL)
+        val decisionTime = nowMs?.let { Instant.ofEpochMilli(it).atZone(calculationZone) }
+            ?: Instant.ofEpochMilli(refMs).atZone(calculationZone).toLocalDate().atTime(20, 0).atZone(calculationZone)
+        val cutoff = decisionTime.toLocalDate().atTime(20, 0).atZone(calculationZone)
         return try {
             val availableAt = if (decisionTime.isBefore(cutoff)) decisionTime else cutoff
             val historyBoundary = historicalDataCutoffMs?.let {
@@ -133,7 +154,7 @@ object NextNightModel {
                             Instant.parse(record.modifiedAt).isBefore(historyBoundary)
                     }.getOrDefault(false)
                 }
-            val contextObservedAt = contextObservedAtMs?.let { Instant.ofEpochMilli(it).atZone(SEOUL) } ?: decisionTime
+            val contextObservedAt = contextObservedAtMs?.let { Instant.ofEpochMilli(it).atZone(calculationZone) } ?: decisionTime
             val up = userProfile(engineNights, availableAt).copy(dailyContext = dailyContext(direct, features, contextObservedAt))
             val out = eng.compute(
                 up, engineNights, decisionTime.toInstant(), historicalEvaluation = historicalReconstruction,
@@ -253,7 +274,7 @@ object NextNightModel {
                         else record.takeIf { recordAvailableAt(it, observedAt, strict = historicalCsvReanalysis) }
                     }
                     .mapNotNull { record ->
-                        runCatching { Instant.parse(record.wakeTime).atZone(SEOUL).toLocalDate() to record }.getOrNull()
+                        runCatching { Instant.parse(record.wakeTime).atZone(calculationZone).toLocalDate() to record }.getOrNull()
                     }
                     .groupBy({ it.first }, { it.second })
                     .mapValues { (_, values) -> values.maxWithOrNull(compareBy<NightRecord>({ it.durationMinutes }, { Instant.parse(it.modifiedAt) }))!! }
@@ -263,7 +284,7 @@ object NextNightModel {
                 .filter { it.source == "manual" || it.source == "diary" }
                 .filter { recordAvailableAt(it, observedAt, strict = historicalCsvReanalysis) }
                 .mapNotNull { record ->
-                    runCatching { Instant.parse(record.wakeTime).atZone(SEOUL).toLocalDate() to record }.getOrNull()
+                    runCatching { Instant.parse(record.wakeTime).atZone(calculationZone).toLocalDate() to record }.getOrNull()
                 }
                 .groupBy({ it.first }, { it.second })
                 .mapValues { (_, values) -> values.maxWithOrNull(compareBy<NightRecord>({ Instant.parse(it.modifiedAt) }, { it.id }))!! }
@@ -292,7 +313,7 @@ object NextNightModel {
         fatigue: Int? = null, rested: Int? = null, observedAt: Instant
     ) = NightRecord(
         id = id,
-        day = Instant.ofEpochMilli(startMs).atZone(SEOUL).toLocalDate().toString(),
+        day = Instant.ofEpochMilli(endMs).atZone(calculationZone).toLocalDate().toString(),
         bedtime = Instant.ofEpochMilli(startMs).toString(),
         wakeTime = Instant.ofEpochMilli(endMs).toString(),
         durationMinutes = ((endMs - startMs) / 60_000L).toInt(),
@@ -302,7 +323,7 @@ object NextNightModel {
         modifiedAt = observedAt.toString()
     )
 
-    private fun wakeDate(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(SEOUL).toLocalDate()
+    private fun wakeDate(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(calculationZone).toLocalDate()
 
     private fun recordAvailableAt(record: NightRecord, boundary: Instant, strict: Boolean = false): Boolean = runCatching {
         val modified = Instant.parse(record.modifiedAt)
@@ -330,7 +351,7 @@ object NextNightModel {
 
     /** Canonical live-v7 night association. The frozen research forecast keeps its separate 20:00 cutoff. */
     internal fun liveNightId(now: ZonedDateTime, usualWake: String = profile.usualWake): LocalDate =
-        MeasurementRecommendationPolicy.nightId(now.withZoneSameInstant(SEOUL), java.time.LocalTime.parse(usualWake))
+        MeasurementRecommendationPolicy.nightId(now, java.time.LocalTime.parse(usualWake))
 
     /**
      * 설문 → 엔진 생활 맥락. 첫 일정과 완료된 낮잠을 live-v7의 밤 ID에 연결한다.

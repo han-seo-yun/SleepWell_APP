@@ -67,7 +67,8 @@ object SleepAnalysisPipeline {
         alignToEpochBoundary: Boolean = true,
         residualModel: RidgeResidualModel? = null,
         predictionFeatures: Map<String, Double?> = emptyMap(),
-        targetSleepMin: Double? = null
+        targetSleepMin: Double? = null,
+        calculationZone: java.time.ZoneId = java.time.ZoneId.of(DisplaySettings.zone.zoneId)
     ): HealthResult<AnalysisResult> {
         return try {
             // ── 1. CSV 파싱 ──────────────────────────────────────────
@@ -114,14 +115,15 @@ object SleepAnalysisPipeline {
 
             // ── 6. Two-Process 모델 실행 (S, C_sleep, propensity, history) ──
             val (timestamps, isSleep) = SleepEpochConverter.toModelInputArrays(extendedTimeline)
-            val processOutput = TwoProcessModel.compute(timestamps, isSleep)
+            val processOutput = TwoProcessModel.compute(timestamps, isSleep, calculationZone)
 
             // ── 7. 미래 S 예측 ────────────────────────────────────────
             val futureSPoints = TwoProcessModel.predictFutureS(
                 lastS = processOutput.currentS,
                 lastTimestampMs = processOutput.lastTimestampMs,
                 phaseRef = processOutput.phaseRef,
-                futureIntervalMin = 15
+                futureIntervalMin = 15,
+                calculationZone = calculationZone
             )
 
             // ── 8. sleepRecords 구성 (전체, 세션별 요약) ───────────────
@@ -152,7 +154,7 @@ object SleepAnalysisPipeline {
                 )
             }
 
-            val recordDays = PredictionStatus.recordDays(sleepRecords)
+            val recordDays = PredictionStatus.recordDays(sleepRecords, calculationZone)
             val personalSleepTarget = targetSleepMin ?: medianSleepMinutes(sleepRecords)
             val futurePoints = futureSPoints.map {
                 PredictedPoint(it.timestampMs, it.predictedS, it.predictedC, it.predictedPropensity)
@@ -162,7 +164,8 @@ object SleepAnalysisPipeline {
                 directInput = directInput,
                 residualModel = residualModel,
                 features = predictionFeatures,
-                targetSleepMin = personalSleepTarget
+                targetSleepMin = personalSleepTarget,
+                calculationZone = calculationZone
             )
 
             // ── 10. AnalysisResult 조립 ──────────────────────────────

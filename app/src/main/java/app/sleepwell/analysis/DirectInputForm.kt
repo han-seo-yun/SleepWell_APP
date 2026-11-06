@@ -13,6 +13,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.time.format.ResolverStyle
 import java.util.Locale
+import java.util.TimeZone
 
 /*
  * 4단계 직접 입력: 화면의 글자 입력 → 채윤 파이프라인의 DirectInput 으로 바꾸는 곳. (소빈 · 2026-09-25)
@@ -268,8 +269,8 @@ object DirectInputParser {
         val napEndMs = latestEventOccurrence("낮잠 끝난 시각", napEnd)
         // 설문 날짜 = 기준 시각 − 6시간의 날짜 (웹 설문의 "예측 기준 날짜"와 같은 뜻)
         val survey = if (!anySurvey) null else SurveyDay(
-            participant = "me", date = if (nowMs == null) SurveyCsv.surveyDateFor(base) else
-                NextNightModel.liveNightId(java.time.Instant.ofEpochMilli(base).atZone(java.time.ZoneId.of("Asia/Seoul"))).toString(),
+            participant = "me", date = if (nowMs == null) SurveyCsv.surveyDateFor(base, TimeZone.getTimeZone(zoneId)) else
+                NextNightModel.liveNightId(java.time.Instant.ofEpochMilli(base).atZone(zoneId)).toString(),
             caffeineUsed = caf?.let { it > 0 }, caffeineMg = caf, lastCaffeine = lastCaf,
             napMinutes = nap, napEnd = napEnd, exerciseMinutes = ex, exerciseEnd = null,
             exerciseIntensity = form.exerciseIntensity, fatigue = form.condition, fatigueScaleMax = form.fatigueScaleMax,
@@ -284,7 +285,7 @@ object DirectInputParser {
             targetWakeMs = targetWake,
             lastCaffeineMs = lastCaffeineMs,
             napEndMs = napEndMs,
-            sleepWakeDate = linked?.day ?: wake?.let { Instant.ofEpochMilli(it).atZone(ZoneId.of("Asia/Seoul")).toLocalDate().toString() },
+            sleepWakeDate = linked?.day ?: wake?.let { Instant.ofEpochMilli(it).atZone(zoneId).toLocalDate().toString() },
             sleepLatencyMinutes = sleepLatency,
             awakeMinutes = awakeMinutes,
             sleepWakeMs = measuredWake
@@ -298,7 +299,7 @@ object DirectInputParser {
             plannedBedMs = plannedBed
         )
         val diary = if (errors.isEmpty() && bed != null && wake != null && nowMs != null) {
-            val wakeDate = Instant.ofEpochMilli(wake).atZone(ZoneId.of("Asia/Seoul")).toLocalDate().toString()
+            val wakeDate = Instant.ofEpochMilli(wake).atZone(zoneId).toLocalDate().toString()
             SleepRecord(
                 id = "diary:$wakeDate",
                 day = wakeDate,

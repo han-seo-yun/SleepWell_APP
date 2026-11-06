@@ -146,7 +146,7 @@ val APP_ZONE: TimeZone = TimeZone.getTimeZone("Asia/Seoul")
 
 // ─────────────────────────────────────────────────────────────
 // 기기 설정을 읽은 불변 스냅샷. ID가 바뀌면 Compose도 변경을 감지한다.
-// 모델의 연구용 날짜 계약과 export(APP_ZONE)는 표시 시간대와 독립적이다.
+// APP_ZONE은 기존 export 형식 호환을 위해 고정한다. 입력·계산·표시는 DisplaySettings.zone을 쓴다.
 // ─────────────────────────────────────────────────────────────
 data class DisplayZone(val zoneId: String) {
     val tz: TimeZone get() = TimeZone.getTimeZone(zoneId)

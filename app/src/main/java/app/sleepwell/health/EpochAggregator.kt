@@ -56,6 +56,7 @@ object EpochAggregator {
      * 낮 시간 데이터는 여기에 들어가지 않는다 (hr.csv / steps.csv 로 따로 나감).
      */
     fun aggregate(snapshot: HealthSnapshot): List<EpochRow> {
+        val calculationZone = DisplaySettings.zone.tz
         val hr = snapshot.heartRate.sortedBy { it.timeMs }
         val steps = snapshot.steps.sortedBy { it.startMs }
         val out = mutableListOf<EpochRow>()
@@ -66,8 +67,8 @@ object EpochAggregator {
                 if (session.endMs <= session.startMs) return@forEach   // 길이 0 이하 세션은 버린다
 
                 // 이 세션이 속한 밤의 기준점 = 그 밤 날짜의 정오
-                val anchor = nightAnchorMs(session.startMs)
-                val night = nightIdOf(anchor)
+                val anchor = nightAnchorMs(session.startMs, calculationZone)
+                val night = nightIdOf(anchor, calculationZone)
                 val segs = session.stages.sortedBy { it.startMs }
 
                 // 격자를 세션 시작이 아니라 정오에 맞춘다. 그래서 첫 칸 번호가 0이 아니고,
@@ -141,8 +142,7 @@ object EpochAggregator {
      * 한국은 서머타임이 없어 정오 간격이 항상 24시간이다. 다른 표준시로 확장할 때는
      * Calendar 가 로컬 정오를 다시 계산해 주므로 이 함수는 그대로 쓸 수 있다.
      */
-    // (2026-09-25) 기기 시간대가 아니라 앱 기준 시간대(APP_ZONE)로 정오를 잡는다. 에뮬레이터(UTC)에서 night 가 하루 어긋나던 문제
-    private fun nightAnchorMs(sessionStartMs: Long): Long = Calendar.getInstance(APP_ZONE).apply {
+    private fun nightAnchorMs(sessionStartMs: Long, calculationZone: java.util.TimeZone): Long = Calendar.getInstance(calculationZone).apply {
         timeInMillis = sessionStartMs - 12 * 3_600_000L
         set(Calendar.HOUR_OF_DAY, 12)
         set(Calendar.MINUTE, 0)
@@ -151,7 +151,7 @@ object EpochAggregator {
     }.timeInMillis
 
     /** 기준 정오의 날짜를 yyyyMMdd 정수로. 조회 범위가 바뀌어도 값이 변하지 않는다. */
-    private fun nightIdOf(anchorMs: Long): Int = Calendar.getInstance(APP_ZONE).let { c ->
+    private fun nightIdOf(anchorMs: Long, calculationZone: java.util.TimeZone): Int = Calendar.getInstance(calculationZone).let { c ->
         c.timeInMillis = anchorMs
         c.get(Calendar.YEAR) * 10_000 + (c.get(Calendar.MONTH) + 1) * 100 + c.get(Calendar.DAY_OF_MONTH)
     }

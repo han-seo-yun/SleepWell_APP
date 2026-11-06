@@ -35,19 +35,26 @@ data class EngineOutput(
  */
 class UserModelEngine private constructor(
     private val fusionFactory: () -> PortableFusionModel,
-    private val populationLoader: () -> ByteArray
+    private val populationLoader: () -> ByteArray,
+    private val calculationZone: ZoneId
 ) {
-    constructor(context: Context) : this(
-        fusionFactory = { PortableFusionModel(context) },
-        populationLoader = { context.assets.open("models/population_prior.json").use { it.readBytes() } }
+    constructor(context: Context, calculationZone: ZoneId = DEFAULT_ZONE) : this(
+        fusionFactory = { PortableFusionModel(context, calculationZone) },
+        populationLoader = { context.assets.open("models/population_prior.json").use { it.readBytes() } },
+        calculationZone = calculationZone
     )
 
-    internal constructor(assetLoader: (String) -> ByteArray, testable: Boolean = true) : this(
-        fusionFactory = { PortableFusionModel(assetLoader, testable) },
-        populationLoader = { assetLoader("models/population_prior.json") }
+    internal constructor(
+        assetLoader: (String) -> ByteArray,
+        testable: Boolean = true,
+        calculationZone: ZoneId = DEFAULT_ZONE
+    ) : this(
+        fusionFactory = { PortableFusionModel(assetLoader, testable, calculationZone) },
+        populationLoader = { assetLoader("models/population_prior.json") },
+        calculationZone = calculationZone
     )
     companion object {
-        private val SEOUL = ZoneId.of("Asia/Seoul")
+        internal val DEFAULT_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
         private const val POPULATION_HASH = "5cd8cc62078ee0a1b44d029513090e82588b5e71c46e6bd98dac54220ef7d396"
         private const val PERSONALIZATION_POLICY_VERSION = "personalization-v5-measurement-evidence"
         private const val PERSONALIZATION_MINIMUM_HISTORY = 1
@@ -66,8 +73,8 @@ class UserModelEngine private constructor(
         historicalEvaluation: Boolean = false,
         inputPolicy: SleepInputPolicy = SleepInputPolicy.DIARY_ONLY
     ): EngineOutput {
-        val localNow = now.atZone(SEOUL)
-        val decisionToday = localNow.toLocalDate().atTime(20, 0).atZone(SEOUL)
+        val localNow = now.atZone(calculationZone)
+        val decisionToday = localNow.toLocalDate().atTime(20, 0).atZone(calculationZone)
         val preview = localNow.isBefore(decisionToday)
         val cutoff = decisionToday
         val forecastBoundary = if (preview) now else cutoff.toInstant()
@@ -97,7 +104,7 @@ class UserModelEngine private constructor(
             else availableAtOrBefore(personalizationBoundary, it)
         }
         val forecastInputRows = policyRows(forecastRecords, localNow, profile.createdAt, inputPolicy)
-        val personalizationNow = personalizationBoundary.atZone(SEOUL)
+        val personalizationNow = personalizationBoundary.atZone(calculationZone)
         val liveInputRows = policyRows(liveRecords, personalizationNow, profile.createdAt, inputPolicy)
         val forecastInputRecords = forecastInputRows.map { it.record }
         val liveInputRecords = liveInputRows.map { it.record }
@@ -111,7 +118,7 @@ class UserModelEngine private constructor(
         )
         val usualWake = LocalTime.parse(profile.usualWake)
         val recommendationNightId = MeasurementRecommendationPolicy.nightId(localNow, usualWake)
-        val recommendationCutoff = recommendationNightId.atTime(20, 0).atZone(SEOUL)
+        val recommendationCutoff = recommendationNightId.atTime(20, 0).atZone(calculationZone)
         val activeContext = profile.dailyContext?.takeIf { context ->
             context.nightId == recommendationNightId.toString() && runCatching {
                 !Instant.parse(context.observedAt).isAfter(now)
@@ -124,7 +131,7 @@ class UserModelEngine private constructor(
         val behaviorBed = (cmiBed + mesaBed) / 2.0
 
         val wakeDate = recommendationNightId.plusDays(1)
-        val habitualWake = ZonedDateTime.of(wakeDate, appPersonalization.wakeTime, SEOUL)
+        val habitualWake = ZonedDateTime.of(wakeDate, appPersonalization.wakeTime, calculationZone)
         val scheduleWake = activeContext?.resolveScheduleWake(recommendationCutoff, localNow)
             ?.takeIf { it.isBefore(habitualWake) }
         val constrainedWake = scheduleWake ?: habitualWake
@@ -140,8 +147,8 @@ class UserModelEngine private constructor(
             MeasurementRecommendationPolicy.CompleteDiary(row.bed, row.wake, latency, sleep)
         }
         val completedNap = activeContext?.let { context ->
-            val start = context.napStart?.let { runCatching { Instant.parse(it).atZone(SEOUL) }.getOrNull() }
-            val end = context.napEnd?.let { runCatching { Instant.parse(it).atZone(SEOUL) }.getOrNull() }
+            val start = context.napStart?.let { runCatching { Instant.parse(it).atZone(calculationZone) }.getOrNull() }
+            val end = context.napEnd?.let { runCatching { Instant.parse(it).atZone(calculationZone) }.getOrNull() }
             if (start != null && end != null) MeasurementRecommendationPolicy.SleepInterval(start, end) else null
         }
         val policy = MeasurementRecommendationPolicy.plan(
@@ -228,7 +235,9 @@ class UserModelEngine private constructor(
             }
         )
         val adaptivePredictions = adaptiveResearchPredictions(result, prospectiveOutcomes, cutoff.toInstant())
-        val researchBaselines = ResearchBaselines.compute(profile, records, cutoff.toInstant(), activeContext)
+        val researchBaselines = ResearchBaselines.compute(
+            profile, records, cutoff.toInstant(), activeContext, calculationZone
+        )
         return EngineOutput(
             recommendation,
             forecast,
@@ -487,6 +496,7 @@ class UserModelEngine private constructor(
         val outcomes = JSONObject()
             .put("schema_version", 3)
             .put("generated_at", now.toInstant().toString())
+            .put("calculation_zone", calculationZone.id)
             .put("night_id", recommendationPolicy.nightId.toString())
             .put("recommendation_night_id", recommendationPolicy.nightId.toString())
             .put("research_forecast_night_id", result.cutoff.toLocalDate().toString())
@@ -735,25 +745,25 @@ class UserModelEngine private constructor(
         if (isManualEntry(row.record)) return true
         if (!isWearableEntry(row.record) || row.record.subjectiveSource?.lowercase() != "questionnaire") return false
         val observed = row.record.subjectiveObservedAt?.let {
-            runCatching { Instant.parse(it).atZone(SEOUL) }.getOrNull()
+            runCatching { Instant.parse(it).atZone(calculationZone) }.getOrNull()
         } ?: return false
         val known = if (boundaryInclusive) !observed.isAfter(boundary) else observed.isBefore(boundary)
         return !observed.isBefore(row.wake) && known
     }
 
     private fun personalRows(records: List<SleepRecord>, now: ZonedDateTime, createdAt: String): List<PersonalRow> {
-        val enrollment = runCatching { Instant.parse(createdAt).atZone(SEOUL) }.getOrElse { now }
+        val enrollment = runCatching { Instant.parse(createdAt).atZone(calculationZone) }.getOrElse { now }
         val bySourceAndDay = mutableMapOf<String, Pair<ZonedDateTime, PersonalRow>>()
         records.forEach { record ->
             runCatching {
-                val bed = Instant.parse(record.bedtime).atZone(SEOUL)
-                val wake = Instant.parse(record.wakeTime).atZone(SEOUL)
-                val observed = Instant.parse(record.modifiedAt).atZone(SEOUL)
+                val bed = Instant.parse(record.bedtime).atZone(calculationZone)
+                val wake = Instant.parse(record.wakeTime).atZone(calculationZone)
+                val observed = Instant.parse(record.modifiedAt).atZone(calculationZone)
                 val timeInBedMinutes = Duration.between(bed, wake).seconds / 60.0
                 val duration = timeInBedMinutes.toInt()
                 val supplementalKnown = record.subjectiveSource?.lowercase() != "questionnaire" ||
                     record.subjectiveObservedAt?.let {
-                        runCatching { !Instant.parse(it).atZone(SEOUL).isAfter(now) }.getOrDefault(false)
+                        runCatching { !Instant.parse(it).atZone(calculationZone).isAfter(now) }.getOrDefault(false)
                     } == true
                 val latency = record.sleepLatencyMinutes.takeIf { supplementalKnown }
                 val awake = record.awakeMinutes.takeIf { supplementalKnown }

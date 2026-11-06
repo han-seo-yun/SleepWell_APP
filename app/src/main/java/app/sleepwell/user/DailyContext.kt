@@ -63,16 +63,16 @@ internal fun DailyContext.resolveScheduleWake(
 internal fun buildDailyContext(
     nightId: String, kind: String, firstClock: String, preparation: String,
     napStartClock: String, napEndClock: String, caffeineClock: String, caffeineAmount: String,
-    now: Instant = Instant.now()
+    now: Instant = Instant.now(),
+    calculationZone: ZoneId = UserModelEngine.DEFAULT_ZONE
 ): DailyContext {
-    val zone = ZoneId.of("Asia/Seoul")
     val date = LocalDate.parse(nightId)
-    require(date == now.atZone(zone).toLocalDate()) { "오늘 날짜의 생활 정보를 입력해주세요." }
+    require(date == now.atZone(calculationZone).toLocalDate()) { "오늘 날짜의 생활 정보를 입력해주세요." }
     require(kind in setOf("work", "class", "first")) { "일정 종류를 선택해주세요." }
     val prep = preparation.trim().toIntOrNull()
     require(prep != null && prep in 0..240) { "준비·이동 시간은 0~240분으로 입력해주세요." }
     fun at(day: LocalDate, clock: String): Instant? = if (clock.isBlank()) null else
-        runCatching { day.atTime(LocalTime.parse(clock.trim())).atZone(zone).toInstant() }
+        runCatching { day.atTime(LocalTime.parse(clock.trim())).atZone(calculationZone).toInstant() }
             .getOrElse { throw IllegalArgumentException("시각은 07:30처럼 입력해주세요.") }
     val first = at(date.plusDays(1), firstClock)
     val napStart = at(date, napStartClock)

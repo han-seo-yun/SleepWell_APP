@@ -139,7 +139,7 @@ object AnalysisRunner {
 
     fun recordDaysUntil(records: List<SleepRecord>, referenceTimeMs: Long): Int =
         records.filter { it.endMs <= referenceTimeMs + 60_000L }
-            .map { java.time.Instant.ofEpochMilli(it.endMs).atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate() }
+            .map { java.time.Instant.ofEpochMilli(it.endMs).atZone(NextNightModel.currentCalculationZone()).toLocalDate() }
             .distinct().size
 
     private fun runOnce(
