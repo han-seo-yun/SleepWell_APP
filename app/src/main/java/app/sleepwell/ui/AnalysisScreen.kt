@@ -257,6 +257,7 @@ fun AnalysisScreen() {
     val diaryFile = remember { File(context.filesDir, DiaryStore.FILE_NAME) }
     val dataDir = remember { File(context.filesDir, "sleep_data") }
     var importedNights by remember { mutableStateOf<List<app.sleepwell.user.SleepRecord>>(emptyList()) }
+    var reanalysisCandidates by remember { mutableStateOf<List<app.sleepwell.user.SleepRecord>>(emptyList()) }
     var diaryCount by remember { mutableStateOf(0) }
     val scroll = rememberScrollState()
     // (2026-10-24) 취침 전 설문은 앱 안에서 직접 입력 (실제 컨디션 입력 칸). 설문 CSV 올리기는 뺐다 —
@@ -305,6 +306,7 @@ fun AnalysisScreen() {
                             val analysisNow = System.currentTimeMillis()
                             NextNightModel.wearablePersonalizationEnabled = true
                             importedNights = ImportedSleepStore.loadModelNights(dataDir, analysisNow, emptyList())
+                            reanalysisCandidates = ImportedSleepStore.loadReanalysisCandidates(dataDir, analysisNow)
                             NextNightModel.importedRecords = ImportedSleepStore.loadModelNights(dataDir, analysisNow, NextNightModel.surveyDays)
                             diaryCount = NextNightModel.diaryRecords.size
                             historyNights = SleepHistoryUi.load(context, analysisNow)
@@ -630,8 +632,18 @@ fun AnalysisScreen() {
                 try { SurveyStore.load(surveyFile) } catch (e: Exception) { emptyList<SurveyDay>() }
             }.filter { it.participant == who }
             val historicalNightId = SurveyCsv.surveyDateFor(sel.basisMs)
-            // Historical reconstruction may only use a revision that was truly saved by that night's 20:00 cutoff.
-            val observedSurvey = SurveyObservationPolicy.historicalNight(allSurveys, who, historicalNightId)
+            val historicalCutoffMs = SurveyObservationPolicy.historicalCutoffMs(historicalNightId)
+            val csvDateCutoffMs = app.sleepwell.analysis.HistoricalCsvReanalysis.dataCutoffMs(
+                sel.basisMs, java.time.ZoneId.of(zone.zoneId), historicalCutoffMs)
+            val csvReanalysis = reanalysisCandidates.any {
+                app.sleepwell.analysis.HistoricalCsvReanalysis.prepare(it, Instant.ofEpochMilli(csvDateCutoffMs)) != null
+            }
+            val inputCutoffMs = if (csvReanalysis) csvDateCutoffMs else historicalCutoffMs
+            // A later answer must not leak across either the model cutoff or the selected display date.
+            val historicalSurveys = if (csvReanalysis) allSurveys.filter { row ->
+                row.savedAt?.let { runCatching { Instant.parse(it).toEpochMilli() < inputCutoffMs }.getOrDefault(false) } == true
+            } else allSurveys
+            val observedSurvey = SurveyObservationPolicy.historicalNight(historicalSurveys, who, historicalNightId)
             val daySurvey = observedSurvey?.survey
             displayedSurvey = daySurvey
             val target = daySurvey?.nextAlarmAfter(Instant.ofEpochMilli(sel.basisMs + DirectInputParser.MIN_WAKE_GAP_MS))?.toEpochMilli()
@@ -640,24 +652,31 @@ fun AnalysisScreen() {
             val pastDirect = target?.let { DirectInput(null, null, it, null) }
             // (임시) 수면시간 목표를 그날 기상까지의 기록으로 — 엔진은 파일 전체로 세서 미래 기록이 섞임 (AnalysisRunner.sleepTargetUntil 참고)
             val sleepTarget = AnalysisRunner.sleepTargetUntil(base.sleepRecords, sel.basisMs)
-            val historicalCutoffMs = SurveyObservationPolicy.historicalCutoffMs(historicalNightId)
             val observedAtMs = observedSurvey?.observedAt?.toEpochMilli()
             val (res, pastModelInputs) = nightCache[sel.startMs] ?: withContext(Dispatchers.Default) {
                 synchronized(NextNightModel) {
                 NextNightModel.surveyDays = allSurveys
-                val inputs = ModelInputs.capture()
+                // Use the raw captured import list and only answers known before this date's cutoff.
+                // Pass inputs explicitly; no temporary mutation of live imports during background sync.
+                val historicalImports = ImportedSleepStore.withQuestionnairesBefore(
+                    reanalysisCandidates, historicalSurveys, Instant.ofEpochMilli(inputCutoffMs))
+                val inputs = ModelInputs.capture().copy(imports = historicalImports)
                 val features = daySurvey?.featureValues(SurveyCsv.SURVEY_ZONE) ?: emptyMap()
                 val result = if (c.input != null) AnalysisRunner.runFileAt(
                     c.input.file, pastDirect, sel.basisMs, sleepTarget, features,
                     recommendationTimeMs = historicalCutoffMs,
                     contextObservedAtMs = observedAtMs,
-                    historicalReconstruction = true
+                    historicalReconstruction = true,
+                    historicalCsvReanalysis = csvReanalysis, historicalImports = historicalImports,
+                    historicalDataCutoffMs = inputCutoffMs.takeIf { csvReanalysis }
                 )
                 else HealthResult.Success(
                     AnalysisRunner.runDiary(
                         pastDirect, features, historicalCutoffMs,
                         contextObservedAtMs = observedAtMs,
-                        historicalReconstruction = true
+                        historicalReconstruction = true,
+                        historicalCsvReanalysis = csvReanalysis, historicalImports = historicalImports,
+                        historicalDataCutoffMs = inputCutoffMs.takeIf { csvReanalysis }
                     )
                 )
                 result to inputs
@@ -668,7 +687,8 @@ fun AnalysisScreen() {
                     AnalysisPresenter.build(res.data, sel.startMs, direct = pastDirect, latestRefMs = latestRef, dataStartMs = dataStart)
                 else
                     // 계산이 안 되는 날: 날짜 고르기는 계속 쓸 수 있게 날짜 목록만 업로드 결과로 만든다
-                    AnalysisPresenter.build(base, sel.startMs, direct = c.direct, latestRefMs = latestRef, dataStartMs = dataStart)
+                    AnalysisPresenter.build(base.copy(recommendation = null), sel.startMs, direct = pastDirect,
+                        latestRefMs = latestRef, dataStartMs = dataStart)
             }
             if (res is HealthResult.Success) {
                 displayedCalculation = DisplayedCalculation(

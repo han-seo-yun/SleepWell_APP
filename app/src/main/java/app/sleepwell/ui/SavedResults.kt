@@ -311,6 +311,13 @@ internal fun HistoryCalendar(month: YearMonth, today: LocalDate, selected: Local
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
                 Text("${day.date.monthValue}/${day.date.dayOfMonth}(${dayOfWeekKo(day.date)}) 저장 결과", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text("현재 기기 시간대 · ${zone.id}", style = MaterialTheme.typography.bodySmall); Spacer(Modifier.height(12.dp))
+                selectedResult?.let {
+                    Text(ResultStore.originLabel(it.predictionOrigin), style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary)
+                    Text("저장된 결과를 그대로 표시하며 다시 계산하지 않아요.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(12.dp))
+                }
                 when { loading -> Row { CircularProgressIndicator(Modifier.size(22.dp)); Text("  저장한 분석을 불러오는 중…") }
                     replay?.display != null -> { ModelRhythmCard(replay!!.display, replay!!.display!!.referenceMs); AnalysisContent(
                         d = replay!!.display!!, sourceName = selectedResult?.source.orEmpty(), zone = UiZone.current,
@@ -339,6 +346,8 @@ internal fun HistoryCalendar(month: YearMonth, today: LocalDate, selected: Local
     Card(Modifier.fillMaxWidth(), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Column(Modifier.padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { Text("$saved 저장", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f));
             TextButton(onClick = { onDelete(result) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("삭제") } }
+        Text(ResultStore.originLabel(result.predictionOrigin), style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary)
         if (result.profileText.isNotBlank()) Line("내 정보", result.profileText, MaterialTheme.colorScheme.secondary)
         if (result.surveyText.isNotBlank()) Line("그날 입력", result.surveyText, MaterialTheme.colorScheme.secondary)
         Line("예상", shown.modelText, MaterialTheme.colorScheme.onSurfaceVariant)

@@ -1,6 +1,7 @@
 package app.sleepwell.analysis
 
 import app.sleepwell.health.DisplaySettings
+import app.sleepwell.health.PredictionOrigin
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.AtomicMoveNotSupportedException
@@ -52,7 +53,11 @@ data class SavedResult(
     val actualText: String = "",
     val profileText: String = "",
     val actualBedMs: Long? = null,
-    val actualWakeMs: Long? = null
+    val actualWakeMs: Long? = null,
+    /** How this prediction was produced. Missing legacy columns remain explicitly unspecified. */
+    val predictionOrigin: PredictionOrigin = PredictionOrigin.LEGACY_UNSPECIFIED,
+    /** Historical boundary used for a reconstruction/reanalysis; null for live and legacy rows. */
+    val historyCutoffMs: Long? = null
 )
 
 data class SavedResultText(
@@ -70,7 +75,8 @@ object ResultStore {
         "habitText", "statusText", "surveyText", "S", "C", "propensity",
         "sourceZoneId", "modelBedMs", "modelWakeMs", "recommendedBedMs", "recommendedWakeMs",
         "habitBedMinute", "habitWakeMinute", "recommendationSleepText",
-        "dayDate", "isPast", "actualText", "profileText", "actualBedMs", "actualWakeMs"
+        "dayDate", "isPast", "actualText", "profileText", "actualBedMs", "actualWakeMs",
+        "predictionOrigin", "historyCutoffMs"
     )
 
     /** 지금 화면(가장 최근 밤)의 결과 → 저장할 한 줄. 일정 카드가 없으면 null */
@@ -124,7 +130,9 @@ object ResultStore {
             } else "",
             profileText = profileText,
             actualBedMs = s.actual?.bedMs,
-            actualWakeMs = s.actual?.wakeMs
+            actualWakeMs = s.actual?.wakeMs,
+            predictionOrigin = s.predictionOrigin,
+            historyCutoffMs = s.historyCutoffMs
         )
     }
 
@@ -166,7 +174,11 @@ object ResultStore {
                 actualText = col(r, "actualText"),
                 profileText = col(r, "profileText"),
                 actualBedMs = col(r, "actualBedMs").toLongOrNull(),
-                actualWakeMs = col(r, "actualWakeMs").toLongOrNull()
+                actualWakeMs = col(r, "actualWakeMs").toLongOrNull(),
+                predictionOrigin = runCatching {
+                    PredictionOrigin.valueOf(col(r, "predictionOrigin"))
+                }.getOrDefault(PredictionOrigin.LEGACY_UNSPECIFIED),
+                historyCutoffMs = col(r, "historyCutoffMs").toLongOrNull()
             )
         }.sortedByDescending { it.savedAtMs }
     }
@@ -203,7 +215,8 @@ object ResultStore {
                 r.recommendedBedMs?.toString().orEmpty(), r.recommendedWakeMs?.toString().orEmpty(),
                 r.habitBedMinute?.toString().orEmpty(), r.habitWakeMinute?.toString().orEmpty(),
                 r.recommendationSleepText.orEmpty(), r.dayDate, r.isPast.toString(), r.actualText, r.profileText,
-                r.actualBedMs?.toString().orEmpty(), r.actualWakeMs?.toString().orEmpty()
+                r.actualBedMs?.toString().orEmpty(), r.actualWakeMs?.toString().orEmpty(),
+                r.predictionOrigin.name, r.historyCutoffMs?.toString().orEmpty()
             ).joinToString(",") { esc(it) }).append('\n')
         }
         // 쓰다가 앱이 꺼져도 기존 파일이 깨지지 않게: 임시 파일에 다 쓴 뒤 바꿔 끼운다
@@ -244,7 +257,8 @@ object ResultStore {
                 r.recText,
                 r.habitText,
                 legacyActualText(r, sourceZone),
-                explicit?.let { "저장 당시 $it 표시 문자열" } ?: "저장 당시 표시 문자열 · 시간대 미기록"
+                originLabel(r.predictionOrigin) + " · " +
+                    (explicit?.let { "저장 당시 $it 표시 문자열" } ?: "저장 당시 표시 문자열 · 시간대 미기록")
             )
         }
         fun full(ms: Long) = format(ms, "M/d HH:mm", displayZone)
@@ -269,8 +283,16 @@ object ResultStore {
             recommendationText = rec,
             habitText = habit,
             actualText = actual,
-            provenanceText = "현재 ${displayZone.id} 표시 · 저장 당시 ${sourceZone.id}"
+            provenanceText = originLabel(r.predictionOrigin) +
+                " · 현재 ${displayZone.id} 표시 · 저장 당시 ${sourceZone.id}"
         )
+    }
+
+    fun originLabel(origin: PredictionOrigin): String = when (origin) {
+        PredictionOrigin.LIVE -> "당시 저장된 예측"
+        PredictionOrigin.CSV_REANALYSIS -> "저장된 CSV 기반 재분석"
+        PredictionOrigin.HISTORICAL_RECONSTRUCTION -> "저장된 과거 재구성"
+        PredictionOrigin.LEGACY_UNSPECIFIED -> "저장된 결과 · 생성 방식 미기록"
     }
 
     private fun legacyActualText(r: SavedResult, sourceZone: ZoneId?): String = when {

@@ -32,14 +32,19 @@ object AnalysisRunner {
         features: Map<String, Double?>,
         nowMs: Long,
         contextObservedAtMs: Long? = null,
-        historicalReconstruction: Boolean = false
+        historicalReconstruction: Boolean = false,
+        historicalCsvReanalysis: Boolean = false,
+        historicalImports: List<app.sleepwell.user.SleepRecord>? = null,
+        historicalDataCutoffMs: Long? = null
     ): AnalysisResult =
         NextNightModel.applyTo(AnalysisResult(
             currentS = 0.5, currentC = 0.0, currentPropensity = 0.5,
             sleepRecords = emptyList(), scHistory = emptyList(), futureS = null,
             recommendation = null, modelVersion = "직접 수면일지",
             calculationTimeMs = nowMs, inputPeriodStartMs = nowMs, inputPeriodEndMs = nowMs
-        ), direct, features, nowMs, contextObservedAtMs, historicalReconstruction)
+        ), direct, features, nowMs, contextObservedAtMs, historicalReconstruction,
+            historicalCsvReanalysis = historicalCsvReanalysis, historicalImports = historicalImports,
+            historicalDataCutoffMs = historicalDataCutoffMs)
 
     /**
      * 채윤 최종본(219987a) 호출 방식: analyze(InputStream, DirectInput?, referenceTimeMs?) → HealthResult.
@@ -86,12 +91,17 @@ object AnalysisRunner {
         predictionFeatures: Map<String, Double?> = emptyMap(),   // (소빈 2026-10-24) 지난 날: 그날 쌓인 설문 값
         recommendationTimeMs: Long? = null,
         contextObservedAtMs: Long? = null,
-        historicalReconstruction: Boolean = false
+        historicalReconstruction: Boolean = false,
+        historicalCsvReanalysis: Boolean = false,
+        historicalImports: List<app.sleepwell.user.SleepRecord>? = null,
+        historicalDataCutoffMs: Long? = null
     ): HealthResult<AnalysisResult> =
         runOnce(
             file, directInput, referenceTimeMs, predictionFeatures, targetSleepMin = targetSleepMin,
             recommendationTimeMs = recommendationTimeMs, contextObservedAtMs = contextObservedAtMs,
-            historicalReconstruction = historicalReconstruction
+            historicalReconstruction = historicalReconstruction,
+            historicalCsvReanalysis = historicalCsvReanalysis, historicalImports = historicalImports,
+            historicalDataCutoffMs = historicalDataCutoffMs
         )
 
     /** Refresh the live plan, but do not turn a long gap in recordings into days of assumed wakefulness. */
@@ -141,7 +151,10 @@ object AnalysisRunner {
         targetSleepMin: Double? = null,
         recommendationTimeMs: Long? = null,
         contextObservedAtMs: Long? = null,
-        historicalReconstruction: Boolean = false
+        historicalReconstruction: Boolean = false,
+        historicalCsvReanalysis: Boolean = false,
+        historicalImports: List<app.sleepwell.user.SleepRecord>? = null,
+        historicalDataCutoffMs: Long? = null
     ): HealthResult<AnalysisResult> = try {
         file.inputStream().use { input ->
             SleepAnalysisPipeline.analyze(
@@ -155,7 +168,9 @@ object AnalysisRunner {
             if (res is HealthResult.Success) HealthResult.Success(
                 NextNightModel.applyTo(
                     res.data, directInput, predictionFeatures, recommendationTimeMs,
-                    contextObservedAtMs, historicalReconstruction
+                    contextObservedAtMs, historicalReconstruction,
+                    historicalCsvReanalysis = historicalCsvReanalysis, historicalImports = historicalImports,
+                    historicalDataCutoffMs = historicalDataCutoffMs
                 )
             ) else res
         }

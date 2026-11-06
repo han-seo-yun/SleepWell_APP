@@ -132,9 +132,9 @@ private fun PastComparison(s: Schedule, background: Color, line: Color, textColo
         Text("예상과 실제", style = MaterialTheme.typography.labelLarge,
             color = textColor, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
-        Text("예상", style = MaterialTheme.typography.labelMedium, color = note)
+        Text(s.modelLabel, style = MaterialTheme.typography.labelMedium, color = note)
         if (s.model != null) TimesRow(s.model, MaterialTheme.colorScheme.onSurface, note)
-        else Text(s.modelNote, style = MaterialTheme.typography.bodySmall, color = note)
+        if (s.modelNote.isNotBlank()) Text(s.modelNote, style = MaterialTheme.typography.bodySmall, color = note)
         Spacer(Modifier.height(10.dp))
         Text("실제", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         s.actual?.let { TimesRow(it, MaterialTheme.colorScheme.primary, note) }

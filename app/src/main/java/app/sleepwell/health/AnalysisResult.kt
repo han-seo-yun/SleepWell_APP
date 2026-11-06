@@ -139,6 +139,9 @@ data class PredictedPoint(
 // 권장 사항
 // ────────────────────────────────────────────────
 
+/** Generation provenance; a historical reconstruction is never a forecast saved at that time. */
+enum class PredictionOrigin { LEGACY_UNSPECIFIED, LIVE, HISTORICAL_RECONSTRUCTION, CSV_REANALYSIS }
+
 data class Recommendation(
     /** 권장 취침 시각 (KST epoch ms). 현재 모델에는 없어 null 가능. */
     val recommendedBedTimeMs: Long?,
@@ -169,7 +172,11 @@ data class Recommendation(
     val personalizationStatus: String? = null,
     val personalizationWeight: Double? = null,
     val evidenceStatus: String? = null,
-    val runtimePolicy: String? = null
+    val runtimePolicy: String? = null,
+    val predictionOrigin: PredictionOrigin = PredictionOrigin.LEGACY_UNSPECIFIED,
+    val historyCutoffMs: Long? = null,
+    val historyRecordCount: Int? = null,
+    val csvHistoryRecordCount: Int? = null
 )
 
 // ────────────────────────────────────────────────

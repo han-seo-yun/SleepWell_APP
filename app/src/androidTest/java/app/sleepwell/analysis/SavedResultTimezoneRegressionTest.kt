@@ -1,6 +1,7 @@
 package app.sleepwell.analysis
 
 import android.test.InstrumentationTestCase
+import app.sleepwell.health.PredictionOrigin
 import java.io.File
 import java.time.Instant
 import java.util.TimeZone
@@ -19,7 +20,7 @@ class SavedResultTimezoneRegressionTest : InstrumentationTestCase() {
             "23:00 취침 → 07:00 기상 (Asia/Seoul 기준 반복 시각 · 자동 변환 안 함)",
             utc.habitText
         )
-        assertEquals("현재 UTC 표시 · 저장 당시 Asia/Seoul", utc.provenanceText)
+        assertEquals("당시 저장된 예측 · 현재 UTC 표시 · 저장 당시 Asia/Seoul", utc.provenanceText)
     }
 
     fun testNewYorkOvernightHabitAcrossDstRemainsTruthfulClockStatistic() {
@@ -57,6 +58,8 @@ class SavedResultTimezoneRegressionTest : InstrumentationTestCase() {
             assertEquals(7 * 60, restored.habitWakeMinute)
             assertEquals(epoch("2026-11-02T14:30:00Z"), restored.actualBedMs)
             assertEquals(epoch("2026-11-02T22:30:00Z"), restored.actualWakeMs)
+            assertEquals(PredictionOrigin.LIVE, restored.predictionOrigin)
+            assertNull(restored.historyCutoffMs)
         } finally {
             file.delete()
         }
@@ -103,7 +106,11 @@ class SavedResultTimezoneRegressionTest : InstrumentationTestCase() {
             assertNull(restored.sourceZoneId)
             assertEquals(restored.modelText, rendered.modelText)
             assertEquals(restored.habitText, rendered.habitText)
-            assertEquals("저장 당시 KST 표시 문자열", rendered.provenanceText)
+            assertEquals(
+                "저장된 결과 · 생성 방식 미기록 · 저장 당시 KST 표시 문자열",
+                rendered.provenanceText
+            )
+            assertEquals(PredictionOrigin.LEGACY_UNSPECIFIED, restored.predictionOrigin)
         } finally {
             file.delete()
         }
@@ -131,7 +138,8 @@ class SavedResultTimezoneRegressionTest : InstrumentationTestCase() {
         habitWakeMinute = 7 * 60,
         recommendationSleepText = "권장 수면 기회 8시간",
         actualBedMs = epoch("2026-11-02T14:30:00Z"),
-        actualWakeMs = epoch("2026-11-02T22:30:00Z")
+        actualWakeMs = epoch("2026-11-02T22:30:00Z"),
+        predictionOrigin = PredictionOrigin.LIVE
     )
 
     private fun epoch(value: String): Long = Instant.parse(value).toEpochMilli()

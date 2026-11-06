@@ -6,6 +6,7 @@ import app.sleepwell.health.DirectInput
 import app.sleepwell.health.DisplaySettings
 import app.sleepwell.health.DisplayZone
 import app.sleepwell.health.PredictedPoint
+import app.sleepwell.health.PredictionOrigin
 import app.sleepwell.health.PropensityPoint
 import app.sleepwell.health.Recommendation
 import app.sleepwell.health.SleepRecord
@@ -59,6 +60,10 @@ class SavedSnapshotRegressionTest : InstrumentationTestCase() {
             assertTrue(NextNightModel.importedRecords.isEmpty())
             assertEquals("gradual_v1", snapshot.result.recommendation!!.runtimePolicy)
             assertEquals("measured_complete", snapshot.result.recommendation!!.evidenceStatus)
+            assertEquals(PredictionOrigin.CSV_REANALYSIS, snapshot.result.recommendation!!.predictionOrigin)
+            assertEquals(epoch("2026-11-03T11:00:00Z"), snapshot.result.recommendation!!.historyCutoffMs)
+            assertEquals(8, snapshot.result.recommendation!!.historyRecordCount)
+            assertEquals(6, snapshot.result.recommendation!!.csvHistoryRecordCount)
             val meta = File(SavedSnapshot.dir(base, 101L), "meta.properties").readText()
             assertTrue(meta.contains("usualBed=22\\:45"))
             assertTrue(meta.contains("onboardingCompleted=true"))
@@ -104,6 +109,29 @@ class SavedSnapshotRegressionTest : InstrumentationTestCase() {
             val snapshot = SavedSnapshot.load(base, 301L)!!
             assertNull(snapshot.input)
             assertTrue(snapshot.result.sleepRecords.isEmpty())
+        } finally { base.deleteRecursively() }
+    }
+
+    fun testLegacySnapshotWithoutPredictionOriginRemainsUnspecified() {
+        val base = tempBase()
+        try {
+            SavedSnapshot.save(base, 302L, result(), null, null, null, null)
+            val resultFile = File(SavedSnapshot.dir(base, 302L), "result.json")
+            val root = org.json.JSONObject(resultFile.readText())
+            root.getJSONObject("recommendation").apply {
+                remove("predictionOrigin")
+                remove("historyCutoffMs")
+                remove("historyRecordCount")
+                remove("csvHistoryRecordCount")
+            }
+            resultFile.writeText(root.toString())
+
+            val restored = SavedSnapshot.load(base, 302L)!!.result.recommendation!!
+
+            assertEquals(PredictionOrigin.LEGACY_UNSPECIFIED, restored.predictionOrigin)
+            assertNull(restored.historyCutoffMs)
+            assertNull(restored.historyRecordCount)
+            assertNull(restored.csvHistoryRecordCount)
         } finally { base.deleteRecursively() }
     }
 
@@ -189,6 +217,18 @@ class SavedSnapshotRegressionTest : InstrumentationTestCase() {
             assertEquals("실제 23:15 취침", restored.actualText)
             assertEquals("희망 수면 8시간", restored.profileText)
             assertEquals("Asia/Seoul", restored.sourceZoneId)
+
+            val live = changed.copy(savedAtMs = 504L, predictionOrigin = PredictionOrigin.LIVE)
+            val reanalysis = changed.copy(
+                savedAtMs = 505L,
+                predictionOrigin = PredictionOrigin.CSV_REANALYSIS,
+                historyCutoffMs = epoch("2026-11-03T11:00:00Z")
+            )
+            ResultStore.saveReplacing(file, live)
+            val (withBothOrigins, originReplacedIds) = ResultStore.saveReplacing(file, reanalysis)
+            assertTrue(originReplacedIds.isEmpty())
+            assertTrue(withBothOrigins.any { it.savedAtMs == 504L && it.predictionOrigin == PredictionOrigin.LIVE })
+            assertTrue(withBothOrigins.any { it.savedAtMs == 505L && it.predictionOrigin == PredictionOrigin.CSV_REANALYSIS })
         } finally { base.deleteRecursively() }
     }
 
@@ -211,7 +251,9 @@ class SavedSnapshotRegressionTest : InstrumentationTestCase() {
                 residualModelVersion = "personal-v5", modelStatus = "personalized", usedFallback = false,
                 explanation = "saved", planFeasible = true, generatedAtMs = calculated,
                 personalizationStatus = "measurement_complete", personalizationWeight = 0.75,
-                evidenceStatus = "measured_complete", runtimePolicy = "gradual_v1"
+                evidenceStatus = "measured_complete", runtimePolicy = "gradual_v1",
+                predictionOrigin = PredictionOrigin.CSV_REANALYSIS,
+                historyCutoffMs = calculated, historyRecordCount = 8, csvHistoryRecordCount = 6
             ),
             modelVersion = "frozen-test", calculationTimeMs = calculated,
             inputPeriodStartMs = bed - 86_400_000L, inputPeriodEndMs = calculated,

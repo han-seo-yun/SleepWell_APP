@@ -1,5 +1,6 @@
 package app.sleepwell.analysis
 
+import app.sleepwell.health.PredictionOrigin
 import app.sleepwell.health.AnalysisResult
 import app.sleepwell.health.DisplaySettings
 import app.sleepwell.health.DirectInput
@@ -158,7 +159,9 @@ data class Schedule(
     val diffText: String? = null,
     /** (2026-10-24) 결과는 나왔지만 제한이 있는 이유 (채윤 LimitCode → 문장). 상태 줄 아래에 작게 */
     val notices: List<String> = emptyList(),
-    val basisMs: Long? = null
+    val basisMs: Long? = null,
+    val predictionOrigin: PredictionOrigin = PredictionOrigin.LEGACY_UNSPECIFIED,
+    val historyCutoffMs: Long? = null
 )
 
 /** (2026-10-24) 계산을 못 했을 때 보여 줄 안내 카드 (채윤 ReasonCode → 제목 + 문장) */
@@ -738,6 +741,12 @@ object AnalysisPresenter {
         val modelNote = when {
             rec == null -> "이번에는 예측을 계산하지 못했어요. 입력 상태를 확인해 주세요."
             model == null -> "모델이 이번에는 예상 시각을 내지 못했어요."
+            rec.predictionOrigin == PredictionOrigin.CSV_REANALYSIS ->
+                "현재 CSV와 내 정보로 다시 계산한 값이에요. 당시 저장된 예측이 아니에요. " +
+                    "${rec.historyCutoffMs?.let(::w) ?: "선택일 20:00"} 이전에 끝난 기록만 사용했어요. " +
+                    "모델 입력 ${rec.historyRecordCount ?: 0}건 · CSV ${rec.csvHistoryRecordCount ?: 0}건"
+            rec.predictionOrigin == PredictionOrigin.HISTORICAL_RECONSTRUCTION ->
+                "선택일 당시 앱이 알고 있던 기록으로 지금 재구성한 값이에요. 당시 저장된 예측과는 구분돼요."
             else -> ""
         }
 
@@ -779,7 +788,7 @@ object AnalysisPresenter {
             basisText = "기준 ${dayTime(shownRefMs)}" + if (wakeBasis) " 기상" else "",
             basisMs = shownRefMs,
             status = status,
-            modelLabel = "예상",
+            modelLabel = if (rec?.predictionOrigin == PredictionOrigin.CSV_REANALYSIS) "CSV 재분석 예상" else "예상",
             model = model,
             modelNote = modelNote,
             habit = habit,
@@ -788,7 +797,10 @@ object AnalysisPresenter {
             needsTargetWake = needsTarget,
             unavailableText = unavailable,
             note = rec?.explanation ?: "연구용 참고값이에요. 예측 정확도는 아직 검증 중이고, 의학적 진단이 아니에요.",
-            title = "${dayOnly(shownRefMs)} 밤 수면 일정",
+            title = if (rec?.predictionOrigin == PredictionOrigin.CSV_REANALYSIS)
+                "${dayOnly(shownRefMs)} CSV 기반 과거 재분석" else "${dayOnly(shownRefMs)} 밤 수면 일정",
+            predictionOrigin = rec?.predictionOrigin ?: PredictionOrigin.LEGACY_UNSPECIFIED,
+            historyCutoffMs = rec?.historyCutoffMs,
             actual = if (past) actual?.let { ScheduleTimes(w(it.startMs), w(it.endMs), it.startMs, it.endMs) } else null,
             actualNote = if (!past) null else actual?.let { "잔 시간 ${duration(it.slept)}" } ?: "이 밤에는 3시간 넘게 잔 기록이 없어요.",
             isPast = past,

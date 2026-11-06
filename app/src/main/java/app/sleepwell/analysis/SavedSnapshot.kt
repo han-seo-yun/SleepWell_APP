@@ -3,6 +3,7 @@ package app.sleepwell.analysis
 import app.sleepwell.health.AnalysisResult
 import app.sleepwell.health.DirectInput
 import app.sleepwell.health.PredictedPoint
+import app.sleepwell.health.PredictionOrigin
 import app.sleepwell.health.PropensityPoint
 import app.sleepwell.health.Recommendation
 import app.sleepwell.health.SleepRecord
@@ -363,6 +364,10 @@ object SavedSnapshot {
         putNullable("planFeasible", r.planFeasible); putNullable("generatedAtMs", r.generatedAtMs)
         putNullable("personalizationStatus", r.personalizationStatus); putNullable("personalizationWeight", r.personalizationWeight)
         putNullable("evidenceStatus", r.evidenceStatus); putNullable("runtimePolicy", r.runtimePolicy)
+        put("predictionOrigin", r.predictionOrigin.name)
+        putNullable("historyCutoffMs", r.historyCutoffMs)
+        putNullable("historyRecordCount", r.historyRecordCount)
+        putNullable("csvHistoryRecordCount", r.csvHistoryRecordCount)
     }
 
     private fun recommendationFromJson(j: JSONObject) = Recommendation(
@@ -375,7 +380,13 @@ object SavedSnapshot {
         explanation = j.nullableString("explanation"), planFeasible = j.nullableBoolean("planFeasible"),
         generatedAtMs = j.nullableLong("generatedAtMs"), personalizationStatus = j.nullableString("personalizationStatus"),
         personalizationWeight = j.nullableDouble("personalizationWeight"), evidenceStatus = j.nullableString("evidenceStatus"),
-        runtimePolicy = j.nullableString("runtimePolicy")
+        runtimePolicy = j.nullableString("runtimePolicy"),
+        predictionOrigin = runCatching {
+            PredictionOrigin.valueOf(j.optString("predictionOrigin"))
+        }.getOrDefault(PredictionOrigin.LEGACY_UNSPECIFIED),
+        historyCutoffMs = j.nullableLong("historyCutoffMs"),
+        historyRecordCount = j.nullableInt("historyRecordCount"),
+        csvHistoryRecordCount = j.nullableInt("csvHistoryRecordCount")
     )
 
     private fun recordsToJson(records: List<PersonalizationRecord>) = JSONArray().apply { records.forEach { r ->
@@ -387,6 +398,7 @@ object SavedSnapshot {
     } }
 
     private fun JSONObject.putNullable(key: String, value: Any?): JSONObject = put(key, value ?: JSONObject.NULL)
+    private fun JSONObject.nullableInt(key: String): Int? = if (present(key)) getInt(key) else null
     private fun JSONObject.present(key: String): Boolean = has(key) && !isNull(key)
     private fun JSONObject.nullableLong(key: String): Long? = if (present(key)) getLong(key) else null
     private fun JSONObject.nullableDouble(key: String): Double? = if (present(key)) getDouble(key) else null

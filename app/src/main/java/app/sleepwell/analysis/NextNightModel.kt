@@ -4,6 +4,7 @@ import app.sleepwell.health.AnalysisResult
 import app.sleepwell.health.DirectInput
 import app.sleepwell.health.LimitCode
 import app.sleepwell.health.Recommendation
+import app.sleepwell.health.PredictionOrigin
 import app.sleepwell.user.DailyContext
 import app.sleepwell.user.MeasurementRecommendationPolicy
 import app.sleepwell.user.PortableFusionModel
@@ -95,22 +96,43 @@ object NextNightModel {
         nowMs: Long? = null,
         contextObservedAtMs: Long? = null,
         historicalReconstruction: Boolean = false,
-        includeImportedRecords: Boolean = wearablePersonalizationEnabled
+        includeImportedRecords: Boolean = wearablePersonalizationEnabled,
+        historicalCsvReanalysis: Boolean = false,
+        historicalImports: List<NightRecord>? = null,
+        historicalDataCutoffMs: Long? = null
     ): AnalysisResult {
+        require(historicalReconstruction || (!historicalCsvReanalysis && historicalImports == null)) {
+            "CSV 재분석 입력은 과거 재구성에서만 사용할 수 있어요."
+        }
+        require(historicalDataCutoffMs == null || (historicalReconstruction && historicalCsvReanalysis)) {
+            "추가 날짜 경계는 CSV 과거 재분석에서만 사용할 수 있어요."
+        }
         val eng = engine ?: return result
         val refMs = result.inputPeriodEndMs.takeIf { it > 0 } ?: return result
         val decisionTime = nowMs?.let { Instant.ofEpochMilli(it).atZone(SEOUL) }
             ?: Instant.ofEpochMilli(refMs).atZone(SEOUL).toLocalDate().atTime(20, 0).atZone(SEOUL)
         val cutoff = decisionTime.toLocalDate().atTime(20, 0).atZone(SEOUL)
         return try {
+            val availableAt = if (decisionTime.isBefore(cutoff)) decisionTime else cutoff
+            val historyBoundary = historicalDataCutoffMs?.let {
+                minOf(availableAt.toInstant(), Instant.ofEpochMilli(it))
+            } ?: availableAt.toInstant()
             val nights = nightlyRecords(
-                result.sleepRecords, direct, observedAt = decisionTime.toInstant(),
-                includeImportedRecords = includeImportedRecords
+                result.sleepRecords, direct, observedAt = if (historicalReconstruction) historyBoundary else decisionTime.toInstant(),
+                includeImportedRecords = includeImportedRecords,
+                historicalCsvReanalysis = historicalCsvReanalysis,
+                imports = historicalImports ?: importedRecords
             )
             // Transient pipeline watch rows use wake time as availability and therefore stay auxiliary.
-            // Service personalization may consume only persisted imports with an actual import/update timestamp.
-            val engineNights = if (includeImportedRecords) nights.filterNot { it.id.startsWith("watch:") } else nights
-            val availableAt = if (decisionTime.isBefore(cutoff)) decisionTime else cutoff
+            // Live service uses receipt time. Explicit CSV reanalysis uses completion-time copies only;
+            // the stored/snapshot input records retain their real receipt provenance.
+            val engineNights = (if (includeImportedRecords) nights.filterNot { it.id.startsWith("watch:") } else nights)
+                .filter { record ->
+                    !historicalCsvReanalysis || runCatching {
+                        Instant.parse(record.wakeTime).isBefore(historyBoundary) &&
+                            Instant.parse(record.modifiedAt).isBefore(historyBoundary)
+                    }.getOrDefault(false)
+                }
             val contextObservedAt = contextObservedAtMs?.let { Instant.ofEpochMilli(it).atZone(SEOUL) } ?: decisionTime
             val up = userProfile(engineNights, availableAt).copy(dailyContext = dailyContext(direct, features, contextObservedAt))
             val out = eng.compute(
@@ -141,7 +163,15 @@ object NextNightModel {
                 personalizationStatus = personalization?.optString("parameter_version")?.takeIf { it.isNotBlank() },
                 personalizationWeight = personalization?.takeIf { it.has("weight") && !it.isNull("weight") }?.optDouble("weight"),
                 evidenceStatus = evidenceStatus,
-                runtimePolicy = runtimePolicy
+                runtimePolicy = runtimePolicy,
+                predictionOrigin = when {
+                    historicalCsvReanalysis -> PredictionOrigin.CSV_REANALYSIS
+                    historicalReconstruction -> PredictionOrigin.HISTORICAL_RECONSTRUCTION
+                    else -> PredictionOrigin.LIVE
+                },
+                historyCutoffMs = historyBoundary.toEpochMilli().takeIf { historicalReconstruction },
+                historyRecordCount = out.outcomes.optJSONObject("input_coverage")?.optInt("forecast_model_input_records"),
+                csvHistoryRecordCount = if (historicalCsvReanalysis) engineNights.count { it.source == "samsung_health_csv" } else null
             )
             result.copy(
                 recommendation = rec,
@@ -177,7 +207,9 @@ object NextNightModel {
         direct: DirectInput? = null,
         surveys: List<SurveyDay> = surveyDays,
         observedAt: Instant = Instant.now(),
-        includeImportedRecords: Boolean = false
+        includeImportedRecords: Boolean = false,
+        historicalCsvReanalysis: Boolean = false,
+        imports: List<NightRecord> = importedRecords
     ): List<NightRecord> {
         val fatigueByDate = surveys.mapNotNull { sv ->
             fatigueForEngine(sv.fatigue, sv.fatigueScaleMax)?.let {
@@ -212,9 +244,14 @@ object NextNightModel {
         }
         if (!demoMode) {
             if (includeImportedRecords) {
-                importedRecords.asSequence()
+                val candidates = if (historicalCsvReanalysis) HistoricalCsvReanalysis.candidates(imports, observedAt) else imports
+                candidates.asSequence()
                     .filter { it.source in setOf("samsung_health", "health_connect", "samsung_health_csv") }
-                    .filter { recordAvailableAt(it, observedAt) }
+                    .mapNotNull { record ->
+                        if (historicalCsvReanalysis && record.source == "samsung_health_csv")
+                            HistoricalCsvReanalysis.prepare(record, observedAt)
+                        else record.takeIf { recordAvailableAt(it, observedAt, strict = historicalCsvReanalysis) }
+                    }
                     .mapNotNull { record ->
                         runCatching { Instant.parse(record.wakeTime).atZone(SEOUL).toLocalDate() to record }.getOrNull()
                     }
@@ -224,7 +261,7 @@ object NextNightModel {
             }
             diaryRecords.asSequence()
                 .filter { it.source == "manual" || it.source == "diary" }
-                .filter { recordAvailableAt(it, observedAt) }
+                .filter { recordAvailableAt(it, observedAt, strict = historicalCsvReanalysis) }
                 .mapNotNull { record ->
                     runCatching { Instant.parse(record.wakeTime).atZone(SEOUL).toLocalDate() to record }.getOrNull()
                 }
@@ -238,10 +275,13 @@ object NextNightModel {
             val day = wakeDate(de)
             val existing = byWake[day]
             if (demoMode || existing == null || existing.source !in setOf("manual", "diary")) {
-                byWake[day] = night(
+                val fallback = night(
                     if (demoMode) "demo:input:$day" else "diary:fallback:$day",
                     ds, de, "manual", fatigueByDate[day], restedByDate[day], observedAt
                 )
+                // An unpersisted direct interval has no earlier observation time. Do not let it
+                // displace a known record and then disappear at the historical exclusive cutoff.
+                if (!historicalCsvReanalysis || recordAvailableAt(fallback, observedAt, strict = true)) byWake[day] = fallback
             }
         }
         return byWake.values.sortedBy { it.wakeTime }
@@ -264,8 +304,11 @@ object NextNightModel {
 
     private fun wakeDate(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(SEOUL).toLocalDate()
 
-    private fun recordAvailableAt(record: NightRecord, boundary: Instant): Boolean = runCatching {
-        !Instant.parse(record.modifiedAt).isAfter(boundary) && !Instant.parse(record.wakeTime).isAfter(boundary)
+    private fun recordAvailableAt(record: NightRecord, boundary: Instant, strict: Boolean = false): Boolean = runCatching {
+        val modified = Instant.parse(record.modifiedAt)
+        val wake = Instant.parse(record.wakeTime)
+        if (strict) modified.isBefore(boundary) && wake.isBefore(boundary)
+        else !modified.isAfter(boundary) && !wake.isAfter(boundary)
     }.getOrDefault(false)
 
     /**

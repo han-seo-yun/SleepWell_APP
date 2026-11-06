@@ -75,18 +75,26 @@ object ImportedSleepStore {
         nowMs: Long = System.currentTimeMillis(),
         surveys: List<SurveyDay> = emptyList()
     ): List<SleepRecord> = synchronized(SleepDataStore.STORAGE_LOCK) {
-        val file = File(dir, FILE_NAME)
-        if (!file.isFile) migrateRawImports(dir)
         val now = Instant.ofEpochMilli(nowMs)
-        loadFile(file)
-            .filter { runCatching { !Instant.parse(it.modifiedAt).isAfter(now) }.getOrDefault(false) }
-            .filter { runCatching { !Instant.parse(it.wakeTime).isAfter(now) }.getOrDefault(false) }
+        loadReanalysisCandidates(dir, nowMs)
             .groupBy { it.day }
             .mapValues { (_, values) -> values.maxWithOrNull(compareBy<SleepRecord>({ it.durationMinutes }, { it.modifiedAt }))!! }
             .values
             .map { record -> attachQuestionnaire(record, surveys, now) }
             .sortedBy { it.wakeTime }
     }
+
+    /** Preserve both CSV and Health Connect candidates until historical availability is evaluated. */
+    internal fun loadReanalysisCandidates(dir: File, nowMs: Long = System.currentTimeMillis()): List<SleepRecord> =
+        synchronized(SleepDataStore.STORAGE_LOCK) {
+            val file = File(dir, FILE_NAME)
+            if (!file.isFile) migrateRawImports(dir)
+            val now = Instant.ofEpochMilli(nowMs)
+            loadFile(file)
+                .filter { runCatching { !Instant.parse(it.modifiedAt).isAfter(now) }.getOrDefault(false) }
+                .filter { runCatching { !Instant.parse(it.wakeTime).isAfter(now) }.getOrDefault(false) }
+                .sortedBy { it.wakeTime }
+        }
 
     private fun migrateRawImports(dir: File) {
         val archive = File(dir, SleepDataStore.ARCHIVE)
@@ -99,6 +107,10 @@ object ImportedSleepStore {
             ingest(dir, read(healthConnect), "health_connect", healthConnect.lastModified().takeIf { it > 0 } ?: 0L)
         }
     }
+
+    /** Join a historical answer from raw stored nights, avoiding later answers overwriting earlier ones. */
+    internal fun withQuestionnairesBefore(records: List<SleepRecord>, surveys: List<SurveyDay>, cutoff: Instant): List<SleepRecord> =
+        records.map { attachQuestionnaire(it, surveys, cutoff.minusNanos(1)) }
 
     private fun attachQuestionnaire(record: SleepRecord, surveys: List<SurveyDay>, now: Instant): SleepRecord {
         val wake = runCatching { Instant.parse(record.wakeTime) }.getOrNull() ?: return record
