@@ -6,6 +6,14 @@ Android 수면 기록·개인화 수면 계획 앱 **SleepWell 통합 v8**입니
 
 패키지 `app.sleepwell` · 버전 `0.8.0` · 최종 통합 검증일 `2026-11-06`
 
+## 설치용 APK
+
+**[SleepWell v0.8.0 APK 바로 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.0/SleepWell-v8-debug.apk)**
+
+Android 10(API 29) 이상에서 설치할 수 있는 검증된 **디버그 서명 APK**입니다. 기존 앱과 서명이 같으면 데이터를 유지하며 업데이트 설치할 수 있습니다. 설치할 때 Android가 요청하면 다운로드에 사용한 앱의 설치 허용을 직접 설정하세요.
+
+[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.0) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.0/SHA256SUMS.txt)
+
 ## 화면과 주요 기능
 
 - **오늘:** 오늘의 수면 준비, 최근 수면 구간·단계 그래프, 개인화 권장, 7일·30일 추세, 모델 추정 지수와 추천 근거.
