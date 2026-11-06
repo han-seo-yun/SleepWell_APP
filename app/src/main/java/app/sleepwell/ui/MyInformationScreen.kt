@@ -1,0 +1,58 @@
+package app.sleepwell.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import app.sleepwell.analysis.NextNightModel
+import app.sleepwell.analysis.ProfileStore
+import java.io.File
+
+@Composable
+fun MyInformationScreen() {
+    val context = LocalContext.current
+    val file = remember { File(context.filesDir, ProfileStore.FILE_NAME) }
+    var profile by remember { mutableStateOf(ProfileStore.load(file) ?: NextNightModel.profile) }
+    var editing by rememberSaveable { mutableStateOf(false) }
+    if (editing) {
+        ProfileEditor(profile, firstRun = false, onCancel = { editing = false }, onSave = { updated ->
+            try {
+                ProfileStore.save(file, updated)
+                NextNightModel.profile = updated
+                profile = updated
+                editing = false
+                null
+            } catch (e: Exception) { "저장하지 못했어요. ${e.message.orEmpty()}" }
+        })
+        return
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("내 정보", style = MaterialTheme.typography.headlineMedium)
+        Text("나의 생활과 수면 목표", style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("희망 수면시간", style = MaterialTheme.typography.labelLarge)
+                Text("${profile.desiredSleepMinutes / 60}시간 ${profile.desiredSleepMinutes % 60}분",
+                    style = MaterialTheme.typography.headlineMedium)
+                Text("평소 취침 ${profile.usualBed} · 기상 ${profile.usualWake}")
+                HorizontalDivider()
+                Text("${ProfileStore.SEXES.firstOrNull { it.first == profile.sex }?.second.orEmpty()} · ${profile.ageBand}세")
+                Button(onClick = { editing = true }, modifier = Modifier.fillMaxWidth()) { Text("기본정보·수면 목표 수정") }
+            }
+        }
+        Text("이 정보는 기기에 저장됩니다. 희망 수면시간과 평소 시각은 개인화 초기값으로 사용하고, 성별·연령대·활동량은 집단 참고값을 고르는 데 사용합니다.",
+            style = MaterialTheme.typography.bodyMedium)
+        HorizontalDivider()
+        Text("시간대 자동 · ${UiZone.current.zoneId}", style = MaterialTheme.typography.bodyMedium)
+        Text("시각은 현재 기기의 시간대에 맞춰 표시합니다.", style = MaterialTheme.typography.bodySmall)
+        Text("SleepWell 0.8.0", style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
