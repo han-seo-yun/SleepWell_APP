@@ -4,15 +4,15 @@ Android 수면 기록·개인화 수면 계획 앱 **SleepWell 통합 v8**입니
 
 **저자: [Han Seoyun (han-seo-yun)](https://github.com/han-seo-yun)**
 
-패키지 `app.sleepwell` · 버전 `0.8.0` · 최종 통합 검증일 `2026-11-06`
+패키지 `app.sleepwell` · 버전 `0.8.1` · 최종 통합 검증일 `2026-11-06`
 
 ## 설치용 APK
 
-**[SleepWell v0.8.0 APK 바로 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.0/SleepWell-v8-debug.apk)**
+**[SleepWell v0.8.1 APK 바로 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.1/SleepWell-v0.8.1-debug.apk)**
 
 Android 10(API 29) 이상에서 설치할 수 있는 검증된 **디버그 서명 APK**입니다. 기존 앱과 서명이 같으면 데이터를 유지하며 업데이트 설치할 수 있습니다. 설치할 때 Android가 요청하면 다운로드에 사용한 앱의 설치 허용을 직접 설정하세요.
 
-[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.0) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.0/SHA256SUMS.txt)
+[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.1) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.1/SHA256SUMS.txt)
 
 ## 화면과 주요 기능
 
@@ -66,7 +66,7 @@ CSV로 한 번에 가져온 과거 수면도 날짜별 DATA33과 개인화 예�
 - 저장 결과를 열 때는 당시 저장한 결과를 그대로 표시합니다. 같은 날짜의 재분석이 기존 예측을 덮어쓰지 않습니다.
 - 모델 가중치·DATA33 계산식·점진 개인화 정책은 변경하지 않았습니다. 이 변경은 과거 CSV 입력 누락을 바로잡은 것이며 정확도 향상에 관한 새 성능 검증은 아닙니다.
 
-위 CSV 수정은 현재 소스의 변경입니다. 상단 `v0.8.0` 릴리스 링크는 이전에 공개한 APK이며, 새 릴리스 게시 전까지 이 수정이 포함되지 않습니다.
+CSV 과거 기록 재분석 수정은 **v0.8.1부터 포함**됩니다. 상단 다운로드 링크에서 수정된 APK를 받을 수 있습니다.
 
 ## 빌드 및 실행
 
