@@ -45,9 +45,9 @@ object NextNightModel {
     /** 주 수면으로 볼 최소 길이 (A안 기상일 규칙과 같음: 3시간 이상) — 낮잠이 "밤"으로 들어가지 않게 */
     const val MAIN_SLEEP_MIN = 180L
 
-    /** 프로필 입력 화면을 만들기 전 임시값 (화면 수정 목록 #3). 나이대 18-29 / 30-44 / 45-59 / 60-80 */
+    /** 나이대는 이전 프로필·스냅샷 호환을 위해 필드만 유지하며 새 프로필에서는 수집하지 않는다. */
     data class ModelProfile(
-        val ageBand: String = "18-29",
+        val ageBand: String = "",
         val sex: String = "any",
         val activityMinutes: Int = 60,
         val desiredSleepMinutes: Int = 480,

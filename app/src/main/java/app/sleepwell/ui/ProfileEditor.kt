@@ -43,7 +43,6 @@ fun ProfileEditor(
     onCancel: (() -> Unit)? = null
 ) {
     val base = initialProfile ?: NextNightModel.ModelProfile()
-    var age by rememberSaveable { mutableStateOf(initialProfile?.ageBand.orEmpty()) }
     var sex by rememberSaveable { mutableStateOf(initialProfile?.sex.orEmpty()) }
     var activity by rememberSaveable { mutableStateOf(base.activityMinutes) }
     var desiredHours by rememberSaveable { mutableStateOf((base.desiredSleepMinutes / 60).toString()) }
@@ -52,7 +51,7 @@ fun ProfileEditor(
     var wake by rememberSaveable { mutableStateOf(base.usualWake) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var onboardingStep by rememberSaveable { mutableStateOf(0) }
-    val hasBasics = age in ProfileStore.AGE_BANDS && ProfileStore.SEXES.any { it.first == sex }
+    val hasBasics = ProfileStore.SEXES.any { it.first == sex }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -75,12 +74,6 @@ fun ProfileEditor(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ProfileStore.SEXES.forEach { (value, label) ->
                         FilterChip(selected = sex == value, onClick = { sex = value; error = null }, label = { Text(label) })
-                    }
-                }
-                Text("연령대", style = MaterialTheme.typography.labelLarge)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ProfileStore.AGE_BANDS.forEach { value ->
-                        FilterChip(selected = age == value, onClick = { age = value; error = null }, label = { Text("${value}세") })
                     }
                 }
             }
@@ -124,11 +117,11 @@ fun ProfileEditor(
             }
         }
         Text(if (firstRun && onboardingStep == 0)
-            "성별·연령대는 집단 참고값을 고르는 데 사용하며, 권장 수면시간을 직접 정하지 않습니다."
-            else "희망 수면시간과 평소 시각은 개인화 초기값으로 사용합니다. 활동량은 집단 참고값용입니다.",
+            "성별은 프로필 정보로 기기에 저장됩니다."
+            else "희망 수면시간과 평소 시각은 개인화 초기값으로 사용합니다. 활동량은 생활 정보로 저장됩니다.",
             style = MaterialTheme.typography.bodySmall)
         if ((!firstRun || onboardingStep == 0) && !hasBasics)
-            Text("성별·연령대를 선택해 주세요.", style = MaterialTheme.typography.bodySmall)
+            Text("성별을 선택해 주세요.", style = MaterialTheme.typography.bodySmall)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         if (firstRun && onboardingStep == 0) Button(onClick = {
             error = null
@@ -142,7 +135,7 @@ fun ProfileEditor(
             } else if (ProfileStore.validClock(bed.trim()) == null || ProfileStore.validClock(wake.trim()) == null) {
                 error = "평소 시각은 23:30처럼 입력해 주세요."
             } else {
-                error = onSave(base.copy(ageBand = age, sex = sex,
+                error = onSave(base.copy(sex = sex,
                     activityMinutes = activity, desiredSleepMinutes = desired, usualBed = bed.trim(),
                     usualWake = wake.trim(), onboardingCompleted = true))
             }

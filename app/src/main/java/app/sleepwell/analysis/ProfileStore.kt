@@ -7,14 +7,15 @@ import java.util.Properties
  * 내 정보(프로필) 저장 (소빈 · 2026-10-31, 통합 v6)
  *
  * 사용자 희망 수면시간과 선언한 평소 시각을 개인화 초기값으로 보존한다.
- * 나이대·성별·활동량은 집단 참고값에 쓰며 희망 수면시간을 덮어쓰지 않는다.
+ * 성별·활동량은 프로필 정보로 보존하며 희망 수면시간을 덮어쓰지 않는다.
+ * 이전 버전의 나이대 값은 저장 호환성을 위해 보존하지만 새 화면에서는 입력받지 않는다.
  * 앱 전용 폴더의 profile.properties 한 파일. 서버로 보내지 않는다. Android 없이 시험할 수 있게 File 만 받는다.
  */
 object ProfileStore {
 
     const val FILE_NAME = "profile.properties"
 
-    /** 엔진이 아는 나이대 (UserModelEngine.normalizeAgeBand) */
+    /** 이전 프로필·스냅샷과 엔진 계약을 읽기 위한 호환 값. 새 화면에는 노출하지 않는다. */
     val AGE_BANDS = listOf("18-29", "30-44", "45-59", "60-80")
 
     /** 화면 표시 이름 → 엔진 값 (female / male / any) */
@@ -39,7 +40,7 @@ object ProfileStore {
             val rawSex = p.getProperty("sex")
             val rawOccupation = p.getProperty("occupation")
             val loaded = NextNightModel.ModelProfile(
-                ageBand = rawAge?.takeIf { it in AGE_BANDS } ?: base.ageBand,
+                ageBand = rawAge ?: base.ageBand,
                 sex = rawSex?.takeIf { s -> SEXES.any { it.first == s } } ?: base.sex,
                 activityMinutes = p.getProperty("activityMinutes")?.toIntOrNull()?.coerceIn(0, 1440) ?: base.activityMinutes,
                 desiredSleepMinutes = p.getProperty("desiredSleepMinutes")?.toIntOrNull()?.coerceIn(420, 540) ?: base.desiredSleepMinutes,
@@ -49,8 +50,7 @@ object ProfileStore {
                 onboardingCompleted = false
             )
             loaded.copy(onboardingCompleted = p.getProperty("onboardingCompleted").toBoolean() &&
-                rawAge == loaded.ageBand && rawSex == loaded.sex &&
-                validBasicFields(loaded))
+                rawSex == loaded.sex && validBasicFields(loaded))
         } catch (e: Exception) { null }
     }
 
@@ -59,7 +59,7 @@ object ProfileStore {
         require(validClock(profile.usualBed) != null && validClock(profile.usualWake) != null) { "평소 시각은 HH:mm 형식으로 입력해 주세요." }
         require(profile.activityMinutes in 0..1440) { "활동 시간은 하루 범위로 입력해 주세요." }
         if (profile.onboardingCompleted) {
-            require(validBasicFields(profile)) { "나이대·성별을 올바르게 선택해 주세요." }
+            require(validBasicFields(profile)) { "성별을 올바르게 선택해 주세요." }
         }
         val p = Properties().apply {
             setProperty("ageBand", profile.ageBand)
@@ -79,7 +79,7 @@ object ProfileStore {
 
     /** 화면 한 줄 요약. 저장된 이전 직업 값은 표시하지 않는다. */
     fun summary(p: NextNightModel.ModelProfile): String =
-        "${p.ageBand}세 · ${SEXES.firstOrNull { it.first == p.sex }?.second ?: p.sex} · " +
+        "${SEXES.firstOrNull { it.first == p.sex }?.second ?: p.sex} · " +
             "희망 ${p.desiredSleepMinutes / 60}시간 ${p.desiredSleepMinutes % 60}분 · 평소 ${p.usualBed}~${p.usualWake}"
 
     /** 파일 부재, legacy/incomplete 저장, 또는 필수 선택값 손상은 모두 최초 설정 화면으로 보낸다. */
@@ -105,5 +105,5 @@ object ProfileStore {
     }
 
     private fun validBasicFields(profile: NextNightModel.ModelProfile): Boolean =
-        profile.ageBand in AGE_BANDS && SEXES.any { it.first == profile.sex }
+        SEXES.any { it.first == profile.sex }
 }

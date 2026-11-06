@@ -22,11 +22,12 @@ class V7LaunchRegressionTest : InstrumentationTestCase() {
 
     fun testDashboardRendersWithoutCreatingDemoRecords() = launchWithProfile(true)
 
-    fun testFirstRunWithoutOccupationEnablesNextAndOpensSleepHabits() {
+    fun testFirstRunWithoutAgeOrOccupationEnablesNextAndPreservesEmptyAgeOnSave() {
         val context = instrumentation.targetContext
         val protectedFiles = listOf(ProfileStore.FILE_NAME, "survey_log.csv", "saved_results.csv", DiaryStore.FILE_NAME)
             .associateWith { name -> File(context.filesDir, name).takeIf { it.exists() }?.readBytes() }
         var activity: Activity? = null
+        var saved: NextNightModel.ModelProfile? = null
         try {
             activity = instrumentation.startActivitySync(Intent(context, HealthPermissionsRationaleActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
@@ -36,10 +37,10 @@ class V7LaunchRegressionTest : InstrumentationTestCase() {
                     SleepWellTheme {
                         ProfileEditor(
                             initialProfile = NextNightModel.ModelProfile(
-                                ageBand = "30-44", sex = "female", occupation = "", onboardingCompleted = false
+                                ageBand = "", sex = "female", occupation = "", onboardingCompleted = false
                             ),
                             firstRun = true,
-                            onSave = { "검증 화면에서는 저장하지 않습니다." }
+                            onSave = { saved = it; null }
                         )
                     }
                 }
@@ -49,19 +50,73 @@ class V7LaunchRegressionTest : InstrumentationTestCase() {
                 fail("최초 설정 화면이 렌더링돼야 합니다.\n${diagnostics("renderer")}")
             assertNull("직업 입력은 최초 설정에 표시하지 않아야 합니다.",
                 findExactTextWithScrolling("직업군"))
+            assertNull("연령대 입력은 최초 설정에 표시하지 않아야 합니다.",
+                findExactTextWithScrolling("연령대"))
+            ProfileStore.AGE_BANDS.forEach { age ->
+                assertNull("연령대 선택 항목은 표시하지 않아야 합니다: $age",
+                    findExactTextWithScrolling("${age}세"))
+            }
             val next = clickableAncestor(findExactTextWithScrolling("다음 · 수면 습관 입력"))
             if (next == null) fail("다음 버튼을 찾을 수 있어야 합니다.\n${diagnostics("next-button")}")
             val nextButton = next ?: throw AssertionError("다음 버튼을 찾을 수 있어야 합니다.")
-            assertTrue("직업 없이 성별·연령대만으로 다음 버튼이 활성화돼야 합니다.", nextButton.isEnabled)
+            assertTrue("연령대와 직업 없이 성별만으로 다음 버튼이 활성화돼야 합니다.", nextButton.isEnabled)
             assertTrue(nextButton.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             instrumentation.waitForIdleSync()
             if (waitForExactTextWithScrolling("희망 수면시간") == null)
                 fail("수면 습관 단계가 렌더링돼야 합니다.\n${diagnostics("sleep-step")}")
+            val save = clickableAncestor(findExactTextWithScrolling("저장하고 시작하기"))
+            if (save == null) fail("저장 버튼을 찾을 수 있어야 합니다.\n${diagnostics("save-button")}")
+            val saveButton = save ?: throw AssertionError("저장 버튼을 찾을 수 있어야 합니다.")
+            assertTrue(saveButton.isEnabled)
+            assertTrue(saveButton.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            instrumentation.waitForIdleSync()
+            assertNotNull(saved)
+            assertEquals("", saved!!.ageBand)
             protectedFiles.forEach { (name, original) ->
                 val current = File(context.filesDir, name).takeIf { it.exists() }?.readBytes()
                 assertTrue("UI 검증은 $name 을 변경하면 안 됩니다.", if (original == null) current == null
                     else current != null && original.contentEquals(current))
             }
+        } finally {
+            activity?.let { opened -> instrumentation.runOnMainSync { opened.finish() } }
+            instrumentation.waitForIdleSync()
+        }
+    }
+
+    fun testEditingLegacyProfileDoesNotShowAgeAndPreservesStoredAge() {
+        val context = instrumentation.targetContext
+        var activity: Activity? = null
+        var saved: NextNightModel.ModelProfile? = null
+        try {
+            activity = instrumentation.startActivitySync(Intent(context, HealthPermissionsRationaleActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            val host = activity as ComponentActivity
+            instrumentation.runOnMainSync {
+                host.setContent {
+                    SleepWellTheme {
+                        ProfileEditor(
+                            initialProfile = NextNightModel.ModelProfile(
+                                ageBand = "60-80", sex = "female", onboardingCompleted = true
+                            ),
+                            firstRun = false,
+                            onSave = { saved = it; null }
+                        )
+                    }
+                }
+            }
+            instrumentation.waitForIdleSync()
+            if (waitForExactText("내 정보 수정") == null)
+                fail("프로필 수정 화면이 렌더링돼야 합니다.\n${diagnostics("legacy-renderer")}")
+            assertNull("저장된 연령대도 편집 입력으로 다시 노출하지 않습니다.",
+                findExactTextWithScrolling("연령대"))
+            assertNull(findExactTextWithScrolling("60-80세"))
+            val save = clickableAncestor(waitForExactTextWithScrolling("저장하고 다시 계산"))
+            if (save == null) fail("수정 저장 버튼을 찾을 수 있어야 합니다.\n${diagnostics("legacy-save")}")
+            val saveButton = save ?: throw AssertionError("수정 저장 버튼을 찾을 수 있어야 합니다.")
+            assertTrue(saveButton.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            instrumentation.waitForIdleSync()
+            assertNotNull(saved)
+            assertEquals("60-80", saved!!.ageBand)
         } finally {
             activity?.let { opened -> instrumentation.runOnMainSync { opened.finish() } }
             instrumentation.waitForIdleSync()

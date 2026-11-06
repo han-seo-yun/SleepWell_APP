@@ -712,7 +712,7 @@ fun AnalysisScreen() {
         val frozen = displayedCalculation ?: return
         val c = frozen.computed
         val inputs = c.modelInputs
-        val profileText = "연령 ${inputs.profile.ageBand} · 성별 ${inputs.profile.sex} · " +
+        val profileText = "성별 ${inputs.profile.sex} · " +
             "희망 수면 ${inputs.profile.desiredSleepMinutes / 60}시간 ${inputs.profile.desiredSleepMinutes % 60}분 · " +
             "평소 ${inputs.profile.usualBed} 취침 / ${inputs.profile.usualWake} 기상"
         val sv = c.survey?.takeIf { it.hasItems() }?.summaryIn(java.time.ZoneId.of(zone.zoneId), includeAlarm = false)

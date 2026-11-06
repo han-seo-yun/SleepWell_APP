@@ -62,22 +62,34 @@ class ProfileOnboardingRegressionTest : InstrumentationTestCase() {
         }
     }
 
-    fun testCompletedSaveRequiresOnlyValidAgeAndSexAndMalformedCompletionDoesNotBypassGate() {
+    fun testCompletedSaveRequiresOnlyValidSexAndNeverInfersOrRejectsLegacyAge() {
         val file = tempFile("invalid")
         try {
             ProfileStore.save(file, NextNightModel.ModelProfile(occupation = "", onboardingCompleted = true))
+            val withoutAge = ProfileStore.load(file)!!
+            assertEquals("", withoutAge.ageBand)
+            assertFalse(ProfileStore.needsOnboarding(withoutAge))
+
+            val legacyAge = NextNightModel.ModelProfile(ageBand = "17", onboardingCompleted = true)
+            ProfileStore.save(file, legacyAge)
+            assertEquals("17", ProfileStore.load(file)!!.ageBand)
             assertFalse(ProfileStore.needsOnboarding(ProfileStore.load(file)))
-            assertFails {
-                ProfileStore.save(file, NextNightModel.ModelProfile(ageBand = "17", onboardingCompleted = true))
-            }
+
             assertFails {
                 ProfileStore.save(file, NextNightModel.ModelProfile(sex = "unspecified", onboardingCompleted = true))
             }
 
             file.writeText("ageBand=not-an-age\nsex=female\noccupation=student\nonboardingCompleted=true\n")
             val malformed = ProfileStore.load(file)!!
-            assertFalse(malformed.onboardingCompleted)
-            assertTrue(ProfileStore.needsOnboarding(malformed))
+            assertEquals("not-an-age", malformed.ageBand)
+            assertTrue(malformed.onboardingCompleted)
+            assertFalse(ProfileStore.needsOnboarding(malformed))
+
+            file.writeText("sex=female\nonboardingCompleted=true\n")
+            val noAgeProperty = ProfileStore.load(file)!!
+            assertEquals("", noAgeProperty.ageBand)
+            assertTrue(noAgeProperty.onboardingCompleted)
+            assertFalse(ProfileStore.needsOnboarding(noAgeProperty))
         } finally {
             file.delete()
         }

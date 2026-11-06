@@ -16,6 +16,9 @@ import java.io.File
 @Composable
 fun MyInformationScreen() {
     val context = LocalContext.current
+    val versionName = remember(context) {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
+    }
     val file = remember { File(context.filesDir, ProfileStore.FILE_NAME) }
     var profile by remember { mutableStateOf(ProfileStore.load(file) ?: NextNightModel.profile) }
     var editing by rememberSaveable { mutableStateOf(false) }
@@ -43,16 +46,16 @@ fun MyInformationScreen() {
                     style = MaterialTheme.typography.headlineMedium)
                 Text("평소 취침 ${profile.usualBed} · 기상 ${profile.usualWake}")
                 HorizontalDivider()
-                Text("${ProfileStore.SEXES.firstOrNull { it.first == profile.sex }?.second.orEmpty()} · ${profile.ageBand}세")
+                Text(ProfileStore.SEXES.firstOrNull { it.first == profile.sex }?.second.orEmpty())
                 Button(onClick = { editing = true }, modifier = Modifier.fillMaxWidth()) { Text("기본정보·수면 목표 수정") }
             }
         }
-        Text("이 정보는 기기에 저장됩니다. 희망 수면시간과 평소 시각은 개인화 초기값으로 사용하고, 성별·연령대·활동량은 집단 참고값을 고르는 데 사용합니다.",
+        Text("이 정보는 기기에 저장됩니다. 희망 수면시간과 평소 시각은 개인화 초기값으로 사용하고, 성별·활동량은 프로필 정보로 보존합니다.",
             style = MaterialTheme.typography.bodyMedium)
         HorizontalDivider()
         Text("시간대 자동 · ${UiZone.current.zoneId}", style = MaterialTheme.typography.bodyMedium)
         Text("시각은 현재 기기의 시간대에 맞춰 표시합니다.", style = MaterialTheme.typography.bodySmall)
-        Text("SleepWell 0.8.0", style = MaterialTheme.typography.labelMedium,
+        Text("SleepWell $versionName", style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
