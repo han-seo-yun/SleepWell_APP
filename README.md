@@ -4,15 +4,15 @@ Android 수면 기록·개인화 수면 계획 앱 **SleepWell 통합 v8**입니
 
 **저자: [Han Seoyun (han-seo-yun)](https://github.com/han-seo-yun)**
 
-패키지 `app.sleepwell` · 버전 `0.8.3` · 최종 통합 검증일 `2026-11-06`
+패키지 `app.sleepwell` · 버전 `0.8.4` · 최종 통합 검증일 `2026-11-07`
 
 ## 설치용 APK
 
-**[SleepWell v0.8.3 APK 바로 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.3/SleepWell-v0.8.3-debug.apk)**
+**[SleepWell v0.8.4 APK 바로 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.4/SleepWell-v0.8.4-debug.apk)**
 
 Android 10(API 29) 이상에서 설치할 수 있는 검증된 **디버그 서명 APK**입니다. 기존 앱과 서명이 같으면 데이터를 유지하며 업데이트 설치할 수 있습니다. 설치할 때 Android가 요청하면 다운로드에 사용한 앱의 설치 허용을 직접 설정하세요.
 
-[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.3) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.3/SHA256SUMS.txt)
+[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.4) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.4/SHA256SUMS.txt)
 
 ## 화면과 주요 기능
 
@@ -45,6 +45,13 @@ Android 10(API 29) 이상에서 설치할 수 있는 검증된 **디버그 서�
 | 저장 형식 | 수신본의 설문·결과 열 구성 | 기존 척도·관측 시각·시간대 열과 받은 버전의 과거 결과 열을 함께 유지 |
 
 받은 버전과 현재본의 `population_prior`, `robust_mesa_v2`, `robust_cmi_v2` 모델 자산은 동일하며 이번 통합에서 가중치를 변경하거나 새 모델을 학습하지 않았습니다. 통합에 따른 **예측 정확도 향상을 주장하지 않습니다.**
+
+## v0.8.4 홈 화면과 그래프 안내 개선
+
+- 홈 제목을 SleepWell로 변경하고 수면 준비 안내를 문장별로 줄바꿈했습니다.
+- 회색은 모델 예상 수면 구간, 초록색은 권장 수면 구간으로 색상과 날짜·시간을 함께 표시합니다.
+- 그래프의 중복 부제를 삭제하고 제목의 모델 추정 표시는 유지했습니다.
+- 모델·DATA33·개인화·동기화 계산은 변경하지 않았습니다. 기존 회귀 테스트 208개 통과 및 저장 파일 7개 보존을 확인했습니다.
 
 ## v0.8.3 연령대 입력 제거
 

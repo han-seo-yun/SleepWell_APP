@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -135,7 +136,6 @@ fun ModelRhythmCard(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("수면 리듬 · 모델 추정", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("측정된 생리 신호가 아닌 모델 추정 지수", style = MaterialTheme.typography.labelMedium, color = note)
             }
 
             RhythmLegend("수면 압력 S", RhythmS, solid = true)
@@ -203,16 +203,23 @@ fun ModelRhythmCard(
             }
 
             display?.let { d ->
-                if (d.sleepBands.isNotEmpty() || d.planBands.isNotEmpty() || d.manualSleep != null) {
-                    Text(
-                        buildString {
-                            if (d.sleepBands.isNotEmpty()) append("■ 기록된 수면")
-                            if (d.manualSleep != null) append(if (isNotEmpty()) " · ■ 직접 보완" else "■ 직접 보완")
-                            if (d.planBands.any { it.kind == PlanKind.PREDICTED }) append(if (isNotEmpty()) " · ▬ 예상" else "▬ 예상")
-                            if (d.planBands.any { it.kind == PlanKind.RECOMMENDED }) append(if (isNotEmpty()) " · ▬ 권장" else "▬ 권장")
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = note
+                if (d.sleepBands.isNotEmpty()) {
+                    RhythmLegend("기록된 수면 구간", ObservedSleep, solid = true, band = true)
+                }
+                if (d.manualSleep != null) {
+                    RhythmLegend("직접 보완한 수면 구간", ManualSleep, solid = true, band = true)
+                }
+                val planTime = DateTimeFormatter.ofPattern("M/d HH:mm")
+                d.planBands.forEach { plan ->
+                    val recommended = plan.kind == PlanKind.RECOMMENDED
+                    val label = if (recommended) "초록색 · 권장 수면 구간" else "회색 · 모델이 예상한 수면 구간"
+                    val start = planTime.format(Instant.ofEpochMilli(plan.startMs).atZone(zone))
+                    val end = planTime.format(Instant.ofEpochMilli(plan.endMs).atZone(zone))
+                    RhythmLegend(
+                        "$label\n$start ~ $end",
+                        if (recommended) RecommendedSleep else PredictedSleep,
+                        solid = true,
+                        band = true
                     )
                 }
                 if (d.future.isNotEmpty()) Text(
@@ -231,14 +238,15 @@ fun ModelRhythmCard(
 }
 
 @Composable
-private fun RhythmLegend(label: String, color: Color, solid: Boolean) {
+private fun RhythmLegend(label: String, color: Color, solid: Boolean, band: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Canvas(Modifier.height(12.dp).fillMaxWidth(0.10f)) {
+        Canvas(Modifier.height(12.dp).width(32.dp)) {
             drawLine(
                 color = color,
                 start = Offset(0f, size.height / 2),
                 end = Offset(size.width, size.height / 2),
-                strokeWidth = 2.dp.toPx(),
+                strokeWidth = (if (band) 5.dp else 2.dp).toPx(),
+                cap = StrokeCap.Round,
                 pathEffect = if (solid) null else PathEffect.dashPathEffect(floatArrayOf(8f, 6f))
             )
         }

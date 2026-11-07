@@ -781,7 +781,7 @@ fun AnalysisScreen() {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("나의 수면", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("SleepWell", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text(AnalysisPresenter.dayTime(nowMs), style = MaterialTheme.typography.bodySmall, color = COLOR_NOTE)
                 Text("시간대 자동 · ${zone.zoneId}", style = MaterialTheme.typography.labelSmall, color = COLOR_NOTE)
             }
@@ -791,7 +791,7 @@ fun AnalysisScreen() {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("오늘의 수면 준비", style = MaterialTheme.typography.titleMedium)
                 Text(if (importedNights.isEmpty()) "목표 기상과 오늘 컨디션을 필요할 때 입력해 주세요."
-                    else "불러온 수면에 개운함·피로도를 더해 주세요. 측정하지 못한 항목만 보완할 수 있어요.",
+                    else "불러온 수면에 개운함·피로도를 더해 주세요.\n측정하지 못한 항목만 보완할 수 있어요.",
                     style = MaterialTheme.typography.bodyMedium)
                 Button(onClick = { showInput = true }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text("목표·컨디션 입력") }
                 surveyNote?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = COLOR_NOTE) }
