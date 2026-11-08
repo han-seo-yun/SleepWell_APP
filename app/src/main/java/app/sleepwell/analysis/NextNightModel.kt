@@ -9,7 +9,7 @@ import app.sleepwell.user.DailyContext
 import app.sleepwell.user.MeasurementRecommendationPolicy
 import app.sleepwell.user.PortableFusionModel
 import app.sleepwell.user.SleepInputPolicy
-import app.sleepwell.user.LocalTabDptPredictionProvider
+import app.sleepwell.user.LocalHgbPredictionProvider
 import app.sleepwell.user.TabDptPredictionProvider
 import app.sleepwell.user.TabDptServerSettings
 import app.sleepwell.user.UserModelEngine
@@ -118,7 +118,7 @@ object NextNightModel {
         val assetLoader = { name: String -> context.assets.open(name).use { it.readBytes() } }
         install(
             assetLoader,
-            LocalTabDptPredictionProvider(context.applicationContext),
+            LocalHgbPredictionProvider { path -> context.applicationContext.assets.open(path).use { it.readBytes() } },
             ZoneId.of(DisplaySettings.zone.zoneId)
         )
     }

@@ -46,5 +46,4 @@ keystore.properties
 Thumbs.db
 
 # Private legacy regression assets (optional local test setup)
-/app/src/main/assets/models/mobile_hgb_*.bin
 /app/src/androidTest/assets/fixtures/mobile_hgb_*_golden.json

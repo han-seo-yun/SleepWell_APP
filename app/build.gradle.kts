@@ -13,8 +13,8 @@ android {
         // 서윤 언니 팀 repo(2026-10-07)와 맞춤: Samsung Health Data SDK 실기기 조건
         minSdk = 29
         targetSdk = 37
-        versionCode = 15
-        versionName = "0.8.7"
+        versionCode = 16
+        versionName = "0.8.8"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 
@@ -33,7 +33,7 @@ android {
         compose = true
     }
     androidResources {
-        noCompress += listOf("onnx", "data", "bin", "json")
+        noCompress += listOf("bin", "json")
     }
     useLibrary("android.test.runner")
     useLibrary("android.test.base")
@@ -50,6 +50,5 @@ dependencies {
     implementation(libs.androidx.material3)
     // (2026-10-27) 삼성 헬스 → 헬스 커넥트 수면 읽기
     implementation(libs.androidx.health.connect)
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
     debugImplementation(libs.androidx.ui.tooling)
 }

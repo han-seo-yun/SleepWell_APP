@@ -1,40 +1,34 @@
 # SleepWell_APP
 
-Android 수면 기록·개인화 수면 계획 앱 **SleepWell 통합 v8**입니다. Samsung Health가 Health Connect에 공유한 수면 기록을 누적하고, 수면 이력의 DATA33 특징과 Two-Process 수리 특징을 경량 TabDPT 개인화 예측에 사용합니다.
+Android 수면 기록·개인화 수면 계획 앱 **SleepWell 통합 v8**입니다. Samsung Health가 Health Connect에 공유한 수면 기록을 누적하고, DATA33 수면 이력 특징과 Two-Process 수리 특징을 기기 내 HGB 하이브리드 예측에 사용합니다.
 
 **저자: [Han Seoyun (han-seo-yun)](https://github.com/han-seo-yun)**
 
-패키지 `app.sleepwell.offlinehgb` · 소스 버전 `0.8.7` · 최종 통합 검증일 `2026-11-08`
+패키지 `app.sleepwell.offlinehgb` · 버전 **0.8.8** (16) · 변경일 `2026-11-08`
 
 ## 설치용 APK
 
-**[기존 SleepWell v0.8.4 APK 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.4/SleepWell-v0.8.4-debug.apk)**
+**[SleepWell v0.8.8 APK 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.8/SleepWell-v0.8.8-debug.apk)**
 
-이 링크는 현재 공개된 **이전 v0.8.4 릴리스**입니다. 이 커밋의 경량 TabDPT 0.8.7 APK 릴리스는 아직 게시하지 않았습니다. Android 10(API 29) 이상에서 설치할 수 있는 디버그 서명 APK이며, 기존 앱과 패키지·서명이 모두 같을 때만 데이터를 유지하며 업데이트됩니다.
+Android 10(API 29) 이상용 디버그 서명 APK입니다. `app.sleepwell.offlinehgb` 0.8.6/0.8.7과 패키지·서명이 같아 앱을 삭제하지 않고 업데이트할 수 있습니다. 기존 `app.sleepwell` 패키지의 앱과는 별도 앱이며 데이터가 자동 이전되지는 않습니다.
 
-[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.4) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.4/SHA256SUMS.txt)
+[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.8) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.8/SHA256SUMS.txt)
 
-## v0.8.7 경량 TabDPT 하이브리드
+## v0.8.8 오프라인 HGB 하이브리드
 
-0.8.7의 실행 경로는 `DATA33 33개 + Two-Process 수리 특징 6개 → 경량 TabDPT → 기존 점진 개인화·권장 정책`입니다. CMI와 MESA는 데이터 코호트 이름이며 서로 다른 알고리즘 이름이 아닙니다. 두 코호트의 예측을 기존 앱 정책대로 결합하고, 실제 수면 기록·설문·목표 기상 시각과 개인화 정책을 이어서 적용합니다.
+실행 경로는 **DATA33 33개 + Two-Process 수리 특징 6개 → HGB → 기존 점진 개인화·권장 정책**입니다. CMI·MESA별 HGB 예측을 기존 앱 정책대로 결합합니다. 서버 연결과 TabDPT 학습 문맥이 필요하지 않습니다.
 
-모바일 모델은 TabDPT v1.3의 수정된 thinking-row 변환을 사용한 **문맥 1,024개·앙상블 2회** 설정입니다. 연구 비교의 전체 학습 문맥·앙상블 4회 설정과 같은 계열이지만 계산 설정은 다릅니다. 이 저장소의 0.8.7을 연구 원본과 완전히 동일한 실행 설정으로 설명하지 않습니다.
+0.8.7의 경량 TabDPT 실행기·ONNX Runtime 의존성·학습 문맥 번들을 APK에서 제외했습니다. 기존 검증된 HGB 학습 모델 두 개(합계 456,000바이트)는 저장소에 포함하므로 별도 모델 다운로드 없이 앱을 빌드할 수 있습니다. 학습 행과 목표값으로 구성된 TabDPT context는 포함하지 않습니다. 과거 저장 결과의 TabDPT 출처 표시는 이력 보존을 위해 유지합니다.
 
-모델 가중치와 CMI·MESA 학습 문맥은 약 256MB이며 원 연구 데이터에서 파생됐으므로 공개 저장소에 포함하지 않습니다. 코드만 복제한 뒤 검증된 내부 번들 경로를 지정해 준비합니다.
+수면 기록·설문·프로필·CSV·결과 스냅샷의 저장 형식, DATA33 계산식, GRADUAL_V1 점진 개인화, 워치 입력 정책, Health Connect 누적·백그라운드 동기화 및 기기 시간대 처리는 유지합니다. HGB 로딩 실패 시 기존 Two-Process 권장으로 처리합니다. 과거 CSV 재분석에서 실시간 예측기를 호출하지 않는 기존 정책도 유지합니다.
 
-```powershell
-.\tools\setup_light_tabdpt.ps1 -BundleDirectory "<검증된 TabDPT 번들 폴더>"
-```
+기존 비교 실험의 개인화 보정 후 입면·기상 평균 절대오차는 연구용 TabDPT 57.40분, 경량 TabDPT 57.59분, HGB 58.17분이었습니다(359명·2,848건, 코호트별 사람 평균을 50:50 결합). 앱의 결합 예측이나 권장 수면시간의 건강 효과를 검증한 지표는 아닙니다. 이번 전환은 정확도 향상 목적이 아니라 오프라인 실행 비용을 줄이기 위한 선택입니다.
 
-스크립트는 번들 9개 파일의 SHA-256을 모두 확인한 경우에만 `app/src/main/assets/tabdpt`로 복사합니다. 해당 폴더는 Git에서 제외됩니다. 해시가 다른 모델이나 학습 문맥을 같은 버전으로 빌드하지 않습니다.
-
-기존 HGB 비교 테스트까지 재현하려면 별도로 허가된 로컬 프로젝트의 HGB 이진 모델·golden 자료를 준비합니다. 이 자료도 Git에서 제외됩니다. 앱의 production 경로는 HGB를 사용하지 않습니다.
+HGB golden 회귀 테스트용 입력은 공개 저장소에 포함하지 않습니다. 허가된 로컬 검증 프로젝트가 있는 경우에만 다음으로 테스트 자산을 준비합니다. 일반 앱 빌드에는 필요하지 않습니다.
 
 ```powershell
-.\tools\setup_legacy_hgb_tests.ps1 -LocalProjectDirectory "<검증된 기존 로컬 프로젝트>"
+.\tools\setup_legacy_hgb_tests.ps1 -LocalProjectDirectory "<검증된 로컬 프로젝트>"
 ```
-
-TabDPT 번들이 없으면 APK 빌드만으로 모델이 준비되는 것은 아닙니다. 코드만 복제한 상태를 모델 검증 완료 상태로 간주하지 마세요.
 
 ## 화면과 주요 기능
 
@@ -142,24 +136,19 @@ macOS/Linux:
 
 생성된 디버그 APK는 `app/build/outputs/apk/debug/app-debug.apk`에 있습니다. Health Connect 수면 읽기 권한이 필요하며 백그라운드 읽기는 지원 OS·권한·배터리 정책에 따라 실행 시점이 달라집니다. 앱 강제 중지 상태에서는 다시 앱을 열 때까지 동기화가 중단될 수 있습니다.
 
-## 검증
+## v0.8.8 검증
 
-경량 TabDPT의 로컬 상태 이름도 홈 권장 카드·그래프 구간·모델 안내 표시 조건에 포함했습니다. 최종 표시 회귀 16개를 추가 실행해 모두 통과했습니다.
+- Android 에뮬레이터 회귀 테스트 **233개 통과**: 일반 217개 + 날짜·시간대 16개.
+- 기존 학습 HGB와 Android 출력의 golden 일치, 28일 기록 → DATA33 → HGB → 점진 개인화 → 추천 카드·구간 표시를 확인했습니다.
+- CSV 과거 재분석의 후일 기록 배제, 설문 복원·5/7점 척도, 저장 결과, 중복 처리·동시 저장, Health Connect 동기화 정책, 워치 입력, 시간대 회귀를 포함합니다.
+- 앱·테스트 APK 빌드 및 lint 통과: **오류 0개, 경고 13개, 힌트 10개**. 남은 경고는 아이콘 미설정·백업 규칙·locale·의존성 버전 등 항목이며 이번 전환으로 모두 해소한 것은 아닙니다.
+- A52s 휴대폰에 데이터 초기화 없이 0.8.8 업데이트·실행 성공. 최종 APK에서 HGB 실기기 검사 6개도 통과했고 기존 프로필을 보존했습니다. 설치 전 이 패키지에는 수면·설문 파일이 없었습니다.
+- APK에서 TabDPT context·ONNX Runtime이 제외되고 기존 HGB 모델 두 개가 해시 일치함을 확인했습니다.
+- 기존 저장소·DATA33·개인화 엔진·Health Connect·백그라운드 동기화·시간대 구현은 전환 전과 동일합니다. 과거 결과를 HGB 결과로 덮어쓰지 않습니다.
 
-0.8.7은 Android 에뮬레이터에서 **기존 회귀 226개, 시간대 6개, 실제 경량 TabDPT 통합 2개 등 234개 검사 통과**, 앱·테스트 APK 빌드 성공, **lint 오류 0개**를 확인했습니다. 실제 모델 검사는 네트워크가 없는 상태에서 CMI·MESA 네 출력이 고정 golden과 1초 이내로 일치하는지 확인했습니다. 28일 메모리 내 수면 기록으로 DATA33→TabDPT→개인화 권장 경로와 기록 수·개인화 가중치도 확인했습니다.
+실제 Samsung Health/Galaxy Watch의 신규 기록 수신과 장시간 OS 백그라운드 동작은 이번 회귀 테스트와 별도입니다. 서버 연결이 필요한 과거 TabDPT live-server 검사와 화면 캡처 전용 검사는 이번 233개에 포함하지 않았습니다. 테스트용 수면 이력은 사용자 저장소에 저장하지 않았습니다.
 
-- CSV 일괄 가져오기 → 날짜별 DATA33·예측, 후일 기록·설문 배제, UTC/DST 경계, 저장 예측·재분석 구분
-- DATA33 누적, 단계 없는 수면, 중복·동시 저장, 측정 기반 개인화와 권장 정책
-- GRADUAL_V1 parity, 워치·설문의 관측 시각, 피로도 5·7점 구분
-- 연령 없는 초기 설정·기존 연령 보존, 빈 기록/21일 혼합 기록에서 연령 유무에 따른 DATA33·예측·개인화 동일성
-- 초기 정보·시간대·자정/DST, 저장 결과의 시간대 변환
-- 스냅샷 고정·공유 입력 보호, 강제 종료 후 임시 파일 정리
-- 저장 설문 복원·부분 편집·과거 응답 보존, CSV 교체 실패 시 기존 파일 보존
-- 사용자 저장소와 분리된 UI fixture로 라이트·다크·큰 글꼴 확인
-
-0.8.7 실기기 업데이트에서는 같은 패키지·서명을 확인하고 삭제 없이 설치했습니다. 설치 직후 저장 파일의 SHA-256이 모두 같았으며 실행 후 사용자 프로필도 보존됐습니다. 이전 릴리스의 영구 파일 7개 보존 검증과는 별도 결과입니다. 개인 기록·스크린샷·백업은 공개 저장소에 올리지 않았습니다. 실물 Samsung Health/Galaxy Watch의 **신규 기록 수신과 장시간 OS 백그라운드 실행은 이번 에뮬레이터 검증과 별도**입니다. 기존 A52s 독립 모델 검사에서는 준비된 모델의 반복 요청 중앙값 약 22초, 일부 요청 약 3분이 관측됐지만, 이는 완성된 0.8.7 앱의 지연 보증이 아닙니다. GRADUAL_V1 런타임이나 권장 수면 정책의 건강 효과가 새로 검증됐다는 의미도 아닙니다.
-
-0.8.7 검증은 이 절을 기준으로 하며, [이전 검증 안내](docs/VALIDATION.md)는 과거 릴리스 기록입니다. 실기기는 잠금 상태여서 이번 업데이트 후 화면 수동 조작은 확인하지 않았습니다.
+이전 버전의 검증 이력은 [기존 검증 안내](docs/VALIDATION.md), 이번 배포 결과는 [v0.8.8 검증](docs/VALIDATION_0.8.8.md)을 참고하세요.
 
 ## 소스 구성
 

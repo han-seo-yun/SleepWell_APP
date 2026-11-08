@@ -844,7 +844,7 @@ fun AnalysisScreen() {
             onConnect = { showConnection = true }, nowMs = nowMs)
         if (loading || nightLoading) Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.height(24.dp).width(24.dp))
-            Text("  수면 계획 계산 중… 첫 계산은 수 분 걸릴 수 있어요.", style = MaterialTheme.typography.bodyMedium)
+            Text("  수면 계획 계산 중…", style = MaterialTheme.typography.bodyMedium)
         }
         error?.let { InfoCard(it.title, it.lines, MaterialTheme.colorScheme.errorContainer) }
         display?.let { d ->

@@ -1,8 +1,12 @@
 package app.sleepwell.user
 
+import android.os.Bundle
 import android.test.InstrumentationTestCase
+import app.sleepwell.analysis.NextNightModel
+import app.sleepwell.health.AnalysisResult
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Duration
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -145,6 +149,90 @@ class LocalHgbIntegrationTest : InstrumentationTestCase() {
         assertEquals("local_hgb_hybrid39", runtime.getString("source"))
         assertEquals(baseline.recommendation.bedtime, historical.recommendation.bedtime)
         assertEquals(baseline.recommendation.wakeTime, historical.recommendation.wakeTime)
+    }
+
+    fun testProductionInstallUsesLocalHgbAndKeepsData33Personalization() {
+        val oldProfile = NextNightModel.profile
+        val oldSurveyDays = NextNightModel.surveyDays
+        val oldDiaryRecords = NextNightModel.diaryRecords
+        val oldImportedRecords = NextNightModel.importedRecords
+        val oldWearableEnabled = NextNightModel.wearablePersonalizationEnabled
+        val oldDemoMode = NextNightModel.demoMode
+        val now = at(2026, 11, 3, 20, 0)
+        try {
+            NextNightModel.profile = NextNightModel.ModelProfile(
+                ageBand = "", sex = "female", activityMinutes = 60,
+                desiredSleepMinutes = 480, usualBed = "23:00", usualWake = "07:00",
+                onboardingCompleted = true
+            )
+            NextNightModel.surveyDays = emptyList()
+            NextNightModel.diaryRecords = (1..28).map { daysAgo ->
+                val wake = now.withHour(7).minusDays(daysAgo.toLong())
+                val bed = wake.minusHours(8).minusMinutes((daysAgo % 4).toLong() * 5)
+                SleepRecord(
+                    id = "memory-$daysAgo", day = wake.toLocalDate().toString(),
+                    bedtime = bed.toInstant().toString(), wakeTime = wake.toInstant().toString(),
+                    durationMinutes = Duration.between(bed, wake).toMinutes().toInt(),
+                    rested = 4, fatigue = 3, source = "diary",
+                    modifiedAt = wake.plusMinutes(1).toInstant().toString(),
+                    sleepLatencyMinutes = 15, awakeMinutes = 0
+                )
+            }
+            NextNightModel.importedRecords = emptyList()
+            NextNightModel.wearablePersonalizationEnabled = false
+            NextNightModel.demoMode = false
+
+            // A stale server setting must not change the production offline provider.
+            NextNightModel.install(
+                instrumentation.targetContext,
+                TabDptServerSettings(enabled = true, endpoint = "not-an-http-endpoint")
+            )
+            val nowMs = now.toInstant().toEpochMilli()
+            val base = AnalysisResult(
+                currentS = 0.5, currentC = 0.0, currentPropensity = 0.5,
+                sleepRecords = emptyList(), scHistory = emptyList(), futureS = null,
+                recommendation = null, modelVersion = "test", calculationTimeMs = nowMs,
+                inputPeriodEndMs = nowMs
+            )
+
+            val applied = NextNightModel.applyTo(base, null, emptyMap(), nowMs = nowMs)
+            val recommendation = checkNotNull(applied.recommendation)
+            assertEquals(HGB_MODEL_VERSION, recommendation.residualModelVersion)
+            assertEquals("hgb_hybrid39_personalized_two_process", recommendation.modelStatus)
+            assertNotNull(recommendation.predictedBedTimeMs)
+            assertNotNull(recommendation.predictedWakeTimeMs)
+            assertEquals(28, recommendation.historyRecordCount)
+            assertNotNull(recommendation.personalizationWeight)
+            assertTrue(checkNotNull(recommendation.personalizationWeight) > 0.0)
+            assertTrue(applied.modelVersion.contains(HGB_MODEL_VERSION))
+            assertNull(NextNightModel.lastError)
+            val display = app.sleepwell.analysis.AnalysisPresenter.build(
+                applied, latestRefMs = nowMs, recommendationReferenceMs = nowMs
+            )
+            assertNotNull("Local HGB plan must be visible without an explicit alarm", display.schedule?.recommended)
+            assertTrue(checkNotNull(display.schedule).status.text.contains("HGB"))
+            assertTrue(display.planBands.any { it.kind == app.sleepwell.analysis.PlanKind.RECOMMENDED })
+
+            val audit = JSONObject()
+                .put("model_id", recommendation.residualModelVersion)
+                .put("status", recommendation.modelStatus)
+                .put("source", "local_hgb_hybrid39")
+                .put("predicted_bed_ms", recommendation.predictedBedTimeMs)
+                .put("predicted_wake_ms", recommendation.predictedWakeTimeMs)
+                .put("history_count", recommendation.historyRecordCount)
+                .put("personalization_weight", recommendation.personalizationWeight)
+            instrumentation.sendStatus(2, Bundle().apply {
+                putString("offline_hgb_audit", audit.toString())
+            })
+        } finally {
+            NextNightModel.profile = oldProfile
+            NextNightModel.surveyDays = oldSurveyDays
+            NextNightModel.diaryRecords = oldDiaryRecords
+            NextNightModel.importedRecords = oldImportedRecords
+            NextNightModel.wearablePersonalizationEnabled = oldWearableEnabled
+            NextNightModel.demoMode = oldDemoMode
+            NextNightModel.install(instrumentation.targetContext, TabDptServerSettings())
+        }
     }
 
     private fun localProvider() = LocalHgbPredictionProvider { path ->
