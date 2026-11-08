@@ -71,7 +71,7 @@ class HistoryCalendarUiEvidenceTest : InstrumentationTestCase() {
 private fun CalendarFixture(mode: String) {
     val zone = ZoneId.of("Asia/Seoul")
     val date = LocalDate.of(2026, 11, 5)
-    val day = HistoryCalendarDay(date, listOf(fixtureNight()), listOf(fixtureResult()))
+    val day = HistoryCalendarDay(date, listOf(fixtureNight()), listOf(fixtureResult()), emptyList())
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(16.dp)) {
         HistoryCalendar(
             month = YearMonth.of(2026, 11), today = date,

@@ -3,6 +3,7 @@ package app.sleepwell
 import app.sleepwell.analysis.NextNightModel
 import app.sleepwell.analysis.ProfileStore
 import app.sleepwell.analysis.BackgroundSleepSync
+import app.sleepwell.user.TabDptSettingsStore
 import androidx.lifecycle.lifecycleScope
 
 import android.content.Context
@@ -115,7 +116,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         UiZone.refreshFromSystem()
         // (v6) 예상·권장 = 서윤 새 모델. assets/models/ 의 모델 파일을 읽는 함수만 넘긴다 (analysis/NextNightModel.kt)
-        if (!NextNightModel.isInstalled) NextNightModel.install { name -> assets.open(name).use { it.readBytes() } }
+        if (!NextNightModel.isInstalled) {
+            NextNightModel.install(this, TabDptSettingsStore.load(this))
+        }
         // (v6) 저장해 둔 내 정보(나이대·성별·활동량) → 새 모델 프로필. 없으면 기본값
         NextNightModel.profile = ProfileStore.load(File(filesDir, ProfileStore.FILE_NAME)) ?: NextNightModel.ModelProfile()
         setContent {

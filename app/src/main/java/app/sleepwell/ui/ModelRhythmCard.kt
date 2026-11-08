@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,8 +69,11 @@ internal data class ModelChartProjection(
     val points: List<ChartPoint>
 )
 
-internal fun modelChartProjection(display: AnalysisDisplay): ModelChartProjection? {
-    val points = (display.history + display.future).sortedBy { it.timeMs }
+internal fun modelChartProjection(
+    display: AnalysisDisplay,
+    futurePoints: List<ChartPoint> = display.future
+): ModelChartProjection? {
+    val points = (display.history + futurePoints).sortedBy { it.timeMs }
     val timeCandidates = buildList {
         addAll(points.map { it.timeMs })
         add(display.referenceMs)
@@ -99,8 +103,8 @@ internal fun nearestModelPoint(
 
 /**
  * The model's two-process rhythm is shown independently from measured sleep stages.
- * Solid lines are calculated through the cutoff; dashed lines are the temporary
- * awake-continuation forecast already supplied by [AnalysisDisplay].
+ * Solid lines are calculated through the cutoff. Dashed lines can show the original
+ * awake-continuation forecast or a display-only scenario that applies the predicted sleep band.
  */
 @Composable
 fun ModelRhythmCard(
@@ -109,16 +113,27 @@ fun ModelRhythmCard(
     modifier: Modifier = Modifier
 ) {
     val zone = remember(UiZone.current.zoneId) { ZoneId.of(UiZone.current.zoneId) }
-    val projection = remember(display) { display?.let(::modelChartProjection) }
+    val sleepScenario = remember(display) {
+        display?.let { predictedSleepScenario(it.future, it.planBands, it.referenceMs) }
+    }
+    // Keep the user's comparison choice while the live display is recalculated each minute.
+    var showSleepScenario by remember { mutableStateOf(false) }
+    val futurePoints = if (showSleepScenario) sleepScenario ?: display?.future.orEmpty()
+        else display?.future.orEmpty()
+    val projection = remember(display, futurePoints) {
+        display?.let { modelChartProjection(it, futurePoints) }
+    }
     var selected by remember(display) { mutableStateOf<ChartPoint?>(null) }
     val note = MaterialTheme.colorScheme.onSurfaceVariant
     val outline = MaterialTheme.colorScheme.outlineVariant
-    val semanticSummary = remember(display, projection, selected, zone) {
+    val semanticSummary = remember(display, projection, selected, zone, showSleepScenario, sleepScenario) {
         buildString {
             append("모델 리듬 그래프. 수면 압력, 일주기 리듬, 잠들기 쉬운 정도를 모델 추정 지수로 표시합니다. ")
             if (projection == null || projection.points.isEmpty()) append("표시할 모델 계산값이 없습니다.")
             else {
-                append("실선은 계산된 과거, 점선은 계속 깨어 있다고 가정한 임시 예측입니다. ")
+                append(if (showSleepScenario && sleepScenario != null)
+                    "실선은 계산된 과거, 점선은 예상 수면 구간 내내 잠든다고 가정한 조건부 시나리오입니다. "
+                else "실선은 계산된 과거, 점선은 계속 각성 상태를 가정한 비교 계산입니다. ")
                 selected?.let { append(modelPointText(it, zone)) }
             }
         }
@@ -141,7 +156,35 @@ fun ModelRhythmCard(
             RhythmLegend("수면 압력 S", RhythmS, solid = true)
             RhythmLegend("일주기 리듬 C", RhythmC, solid = true)
             RhythmLegend("잠들기 쉬운 정도 S+C", RhythmP, solid = true)
-            RhythmLegend("점선 · 계속 깨어 있다고 가정한 예측", note, solid = false)
+            if (sleepScenario != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = showSleepScenario,
+                        onClick = {
+                            showSleepScenario = true
+                            selected = null
+                        },
+                        label = { Text("예상 수면 가정") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = !showSleepScenario,
+                        onClick = {
+                            showSleepScenario = false
+                            selected = null
+                        },
+                        label = { Text("계속 각성 비교") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            RhythmLegend(
+                if (showSleepScenario && sleepScenario != null)
+                    "점선 · 예상 구간 내내 잠든 경우"
+                else "점선 · 계속 각성 상태를 가정한 비교 계산",
+                note,
+                solid = false
+            )
 
             if (projection == null || projection.points.isEmpty()) {
                 EmptyRhythmScaffold()
@@ -185,6 +228,7 @@ fun ModelRhythmCard(
                 Canvas(interactive) {
                     drawModelRhythm(
                         display = requireNotNull(display),
+                        futurePoints = futurePoints,
                         projection = projection,
                         nowMs = nowMs,
                         selected = selected,
@@ -212,7 +256,7 @@ fun ModelRhythmCard(
                 val planTime = DateTimeFormatter.ofPattern("M/d HH:mm")
                 d.planBands.forEach { plan ->
                     val recommended = plan.kind == PlanKind.RECOMMENDED
-                    val label = if (recommended) "초록색 · 권장 수면 구간" else "회색 · 모델이 예상한 수면 구간"
+                    val label = if (recommended) "권장 수면 구간" else "모델이 예상한 수면 구간"
                     val start = planTime.format(Instant.ofEpochMilli(plan.startMs).atZone(zone))
                     val end = planTime.format(Instant.ofEpochMilli(plan.endMs).atZone(zone))
                     RhythmLegend(
@@ -222,11 +266,6 @@ fun ModelRhythmCard(
                         band = true
                     )
                 }
-                if (d.future.isNotEmpty()) Text(
-                    "예측 구간은 기준 시각 뒤에도 계속 깨어 있다고 가정한 임시 계산입니다.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = note
-                )
                 if (d.gapBands.isNotEmpty()) Text(
                     "빗금 구간은 수면 기록이 없어 깨어 있던 것으로 계산됐습니다. 수면 압력이 실제보다 높을 수 있어요.",
                     style = MaterialTheme.typography.labelSmall,
@@ -301,6 +340,7 @@ internal fun modelChartHorizontalBounds(
 
 private fun DrawScope.drawModelRhythm(
     display: AnalysisDisplay,
+    futurePoints: List<ChartPoint>,
     projection: ModelChartProjection,
     nowMs: Long,
     selected: ChartPoint?,
@@ -392,9 +432,9 @@ private fun DrawScope.drawModelRhythm(
     curve(display.history, RhythmS, { it.s }, 2.dp.toPx(), false)
     curve(display.history, RhythmC, { it.c }, 2.dp.toPx(), false)
     curve(display.history, RhythmP, { it.propensity }, 2.6.dp.toPx(), false)
-    curve(display.future, RhythmS.copy(alpha = 0.82f), { it.s }, 2.dp.toPx(), true)
-    curve(display.future, RhythmC.copy(alpha = 0.82f), { it.c }, 2.dp.toPx(), true)
-    curve(display.future, RhythmP.copy(alpha = 0.82f), { it.propensity }, 2.6.dp.toPx(), true)
+    curve(futurePoints, RhythmS.copy(alpha = 0.82f), { it.s }, 2.dp.toPx(), true)
+    curve(futurePoints, RhythmC.copy(alpha = 0.82f), { it.c }, 2.dp.toPx(), true)
+    curve(futurePoints, RhythmP.copy(alpha = 0.82f), { it.propensity }, 2.6.dp.toPx(), true)
 
     if (display.referenceMs in projection.startMs..projection.endMs) {
         val px = x(display.referenceMs)

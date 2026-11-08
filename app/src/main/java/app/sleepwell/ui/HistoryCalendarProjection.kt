@@ -2,6 +2,7 @@ package app.sleepwell.ui
 
 import app.sleepwell.analysis.SavedResult
 import app.sleepwell.analysis.SleepHistoryNight
+import app.sleepwell.analysis.SurveyDay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -11,10 +12,12 @@ import java.time.ZoneId
 data class HistoryCalendarDay(
     val date: LocalDate,
     val sleepRecords: List<SleepHistoryNight>,
-    val savedResults: List<SavedResult>
+    val savedResults: List<SavedResult>,
+    val surveys: List<SurveyDay> = emptyList()
 ) {
     val hasSleep: Boolean get() = sleepRecords.isNotEmpty()
     val hasSavedResult: Boolean get() = savedResults.isNotEmpty()
+    val hasSurvey: Boolean get() = surveys.isNotEmpty()
 }
 
 object HistoryCalendarProjection {
@@ -31,18 +34,35 @@ object HistoryCalendarProjection {
     fun sleepDate(night: SleepHistoryNight, zone: ZoneId): LocalDate =
         Instant.ofEpochMilli(night.wakeMs).atZone(zone).toLocalDate()
 
+    fun surveyDate(survey: SurveyDay, zone: ZoneId): LocalDate? {
+        if (survey.sleepWakeDate != null) {
+            return survey.sleepWakeMs?.takeIf { it > 0L }
+                ?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
+                ?: runCatching { LocalDate.parse(survey.sleepWakeDate) }.getOrNull()
+        }
+        // Context dates are semantic night dates in their declared source zone. They must not
+        // drift to the previous/next date merely because the device display zone changes.
+        if (runCatching { ZoneId.of(survey.sourceZoneId) }.isFailure) return null
+        return runCatching { LocalDate.parse(survey.sourceDate ?: survey.date) }.getOrNull()
+    }
+
     fun days(
         nights: List<SleepHistoryNight>,
         results: List<SavedResult>,
-        zone: ZoneId
+        zone: ZoneId,
+        surveys: List<SurveyDay> = emptyList(),
+        includeSyntheticResults: Boolean = false
     ): Map<LocalDate, HistoryCalendarDay> {
-        val realResults = results.filterNot { it.source.isSyntheticSource() }
-        val dates = (nights.map { sleepDate(it, zone) } + realResults.mapNotNull { resultDate(it, zone) }).toSortedSet()
+        val visibleResults = if (includeSyntheticResults) results else results.filterNot { it.source.isSyntheticSource() }
+        val visibleSurveys = surveys.filter { it.participant == "me" }
+        val dates = (nights.map { sleepDate(it, zone) } +
+            visibleResults.mapNotNull { resultDate(it, zone) } + visibleSurveys.mapNotNull { surveyDate(it, zone) }).toSortedSet()
         return dates.associateWith { date ->
             HistoryCalendarDay(
                 date,
                 nights.filter { sleepDate(it, zone) == date }.sortedBy { it.bedtimeMs },
-                realResults.filter { resultDate(it, zone) == date }.sortedBy { it.savedAtMs }
+                visibleResults.filter { resultDate(it, zone) == date }.sortedBy { it.savedAtMs },
+                visibleSurveys.filter { surveyDate(it, zone) == date }.sortedBy { it.savedAt.orEmpty() }
             )
         }
     }
@@ -58,5 +78,6 @@ object HistoryCalendarProjection {
 
 internal fun String.isSyntheticSource(): Boolean {
     val normalized = lowercase()
-    return normalized.contains("test") || normalized.contains("demo") || normalized.contains("합성")
+    return normalized.contains("test") || normalized.contains("demo") ||
+        normalized.contains("합성") || normalized.contains("시연")
 }

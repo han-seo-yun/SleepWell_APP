@@ -113,7 +113,7 @@ fun SleepHistoryNightCard(night: SleepHistoryNight, zone: ZoneId) {
                 night.sleepLatencyMinutes?.let { add("입면까지 ${it}분") }
                 night.awakeMinutes?.let { add("중간각성 ${it}분") }
             }
-            Text(if (measured.isEmpty()) "세부 측정값 없음 · 수면 시각은 DATA33·개인화에 반영"
+            Text(if (measured.isEmpty()) "세부 측정값 없음 · 수면 시각은 하이브리드 예측·개인화에 반영"
                 else "측정·보완 · ${measured.joinToString(" · ")}",
                 style = MaterialTheme.typography.bodySmall, color = historyNote)
             val answers = buildList {

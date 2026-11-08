@@ -27,6 +27,7 @@ keystore.properties
 # Local personal data, backups, and distribution artifacts
 /verification/
 /배포/
+/app/src/main/assets/tabdpt/
 *.apk
 *.aab
 *.zip
@@ -43,3 +44,7 @@ keystore.properties
 # OS files
 .DS_Store
 Thumbs.db
+
+# Private legacy regression assets (optional local test setup)
+/app/src/main/assets/models/mobile_hgb_*.bin
+/app/src/androidTest/assets/fixtures/mobile_hgb_*_golden.json

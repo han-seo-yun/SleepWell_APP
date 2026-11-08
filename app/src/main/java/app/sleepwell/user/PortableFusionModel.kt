@@ -45,6 +45,7 @@ internal class PortableFusionModel private constructor(
         const val RUNTIME_PERSONALIZATION_POLICY = "gradual_v1"
         const val LEGACY_PERSONALIZATION_POLICY = "legacy14"
         const val FEATURE_CONTRACT = "sleepwell_next_night_robust_v2"
+        const val TABDPT_FEATURE_CONTRACT = "sleepwell_next_night_hybrid39_v1"
         const val PHYSICAL_PROVIDER = "two_process_fixed_v1"
         const val FROZEN_METRICS_SCOPE = "frozen_legacy14_artifact_metrics"
         const val RUNTIME_METRICS_SCOPE = "not_validated_for_gradual_v1_runtime"
@@ -71,10 +72,12 @@ internal class PortableFusionModel private constructor(
             "bed_mad", "wake_mad", "duration_mad", "previous_duration",
             "bed_trend", "wake_trend", "gap_days_mean", "recent_count14"
         )
-        private val PHYSICAL_FEATURES = listOf(
+        internal val PHYSICAL_FEATURES = listOf(
             "current_s", "current_c", "sleep_threshold", "wake_threshold",
             "physical_bed", "physical_wake"
         )
+        internal val DATA_FEATURE_ORDER: List<String> = DATA_FEATURES + EXTRA_FEATURES
+        internal val HYBRID_FEATURE_ORDER: List<String> = DATA_FEATURE_ORDER + PHYSICAL_FEATURES
     }
 
     private val artifacts: Map<String, Artifact> = listOf("cmi", "mesa").associateWith { cohort ->

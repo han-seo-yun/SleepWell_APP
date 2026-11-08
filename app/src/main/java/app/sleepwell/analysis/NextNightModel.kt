@@ -9,6 +9,9 @@ import app.sleepwell.user.DailyContext
 import app.sleepwell.user.MeasurementRecommendationPolicy
 import app.sleepwell.user.PortableFusionModel
 import app.sleepwell.user.SleepInputPolicy
+import app.sleepwell.user.LocalTabDptPredictionProvider
+import app.sleepwell.user.TabDptPredictionProvider
+import app.sleepwell.user.TabDptServerSettings
 import app.sleepwell.user.UserModelEngine
 import app.sleepwell.health.DisplaySettings
 import app.sleepwell.user.UserProfile
@@ -59,6 +62,7 @@ object NextNightModel {
 
     @Volatile private var calculationZone: ZoneId = ZoneId.of("Asia/Seoul")
     private var installedAssetLoader: ((String) -> ByteArray)? = null
+    private var installedTabDptProvider: TabDptPredictionProvider? = null
 
     /**
      * 그동안 쌓인 설문 (지금 데이터의 참여자 것만: 실제 = "me", 합성 = "Test"). 화면이 계산 전에 넣어 준다.
@@ -85,21 +89,51 @@ object NextNightModel {
 
     /** 앱 시작 때 한 번: assets/models/ 를 읽는 함수만 넘긴다 (MainActivity). 테스트에서는 파일 읽기로 넘긴다 */
     fun install(assetLoader: (String) -> ByteArray) =
-        install(assetLoader, ZoneId.of(DisplaySettings.zone.zoneId))
+        install(assetLoader, null, ZoneId.of(DisplaySettings.zone.zoneId))
 
     @Synchronized
     fun install(assetLoader: (String) -> ByteArray, zoneId: ZoneId) {
-        val candidate = UserModelEngine(assetLoader, calculationZone = zoneId)
+        install(assetLoader, null, zoneId)
+    }
+
+    @Synchronized
+    internal fun install(
+        assetLoader: (String) -> ByteArray,
+        tabDptProvider: TabDptPredictionProvider?,
+        zoneId: ZoneId = ZoneId.of(DisplaySettings.zone.zoneId)
+    ) {
+        val candidate = UserModelEngine(
+            assetLoader,
+            calculationZone = zoneId,
+            tabDptProvider = tabDptProvider
+        )
         installedAssetLoader = assetLoader
+        installedTabDptProvider = tabDptProvider
         calculationZone = zoneId
         engine = candidate
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    fun install(context: android.content.Context, settings: TabDptServerSettings) {
+        val assetLoader = { name: String -> context.assets.open(name).use { it.readBytes() } }
+        install(
+            assetLoader,
+            LocalTabDptPredictionProvider(context.applicationContext),
+            ZoneId.of(DisplaySettings.zone.zoneId)
+        )
     }
 
     /** Rebuild the lightweight runtime when Android reports a device-time-zone change. */
     @Synchronized
     fun refreshCalculationZone(zoneId: ZoneId = ZoneId.of(DisplaySettings.zone.zoneId)) {
         if (zoneId == calculationZone) return
-        val candidate = installedAssetLoader?.let { UserModelEngine(it, calculationZone = zoneId) }
+        val candidate = installedAssetLoader?.let {
+            UserModelEngine(
+                it,
+                calculationZone = zoneId,
+                tabDptProvider = installedTabDptProvider
+            )
+        }
         calculationZone = zoneId
         if (candidate != null) engine = candidate
     }
@@ -166,6 +200,19 @@ object NextNightModel {
             val evidenceStatus = personalization?.optJSONObject("evidence_quality")?.optString("status")
             val runtimeModelVersion = out.outcomes.optString("model_version", PortableFusionModel.MODEL_VERSION)
             val runtimePolicy = out.outcomes.optString("runtime_personalization_policy").takeIf { it.isNotBlank() }
+            val tabDptRuntime = out.outcomes.optJSONObject("prediction_runtime")
+                ?: out.outcomes.optJSONObject("tabdpt_runtime")
+            val tabDptStatus = tabDptRuntime?.optString("status").orEmpty()
+            val tabDptEnabled = tabDptStatus != "disabled_legacy_fusion"
+            val tabDptAvailable = tabDptStatus.startsWith("available_")
+            val tabDptApplied = tabDptStatus == "available_applied"
+            val predictionSource = tabDptRuntime?.optString("source").orEmpty()
+            val localHgb = predictionSource == "local_hgb_hybrid39"
+            val localTabDpt = predictionSource == "local_tabdpt_hybrid39"
+            val predictionKey = tabDptRuntime?.optString("prediction_key")
+                ?.takeIf { it.isNotBlank() } ?: "tabdpt_hybrid"
+            val predictionLabel = tabDptRuntime?.optString("display_name")
+                ?.takeIf { it.isNotBlank() } ?: "서버 TabDPT"
             val r = out.recommendation
             val rec = Recommendation(
                 recommendedBedTimeMs = ms(r.bedtime),
@@ -173,11 +220,36 @@ object NextNightModel {
                 recommendedSleepMin = r.durationMinutes.toDouble(),
                 physicalBedTimeMs = avg(p, "physical", "bed"),
                 physicalWakeTimeMs = avg(p, "physical", "wake"),
-                predictedBedTimeMs = avg(p, "hybrid", "bed"),
-                predictedWakeTimeMs = avg(p, "hybrid", "wake"),
-                residualModelVersion = runtimeModelVersion,
-                modelStatus = "fusion_cmi_mesa",
-                usedFallback = evidenceStatus != "adequate",
+                predictedBedTimeMs = if (tabDptEnabled) {
+                    if (tabDptAvailable) avg(p, predictionKey, "bed") else null
+                } else avg(p, "hybrid", "bed"),
+                predictedWakeTimeMs = if (tabDptEnabled) {
+                    if (tabDptAvailable) avg(p, predictionKey, "wake") else null
+                } else avg(p, "hybrid", "wake"),
+                residualModelVersion = if (tabDptAvailable) {
+                    tabDptRuntime?.optString("model_version")
+                } else if (tabDptEnabled) null else runtimeModelVersion,
+                modelStatus = when {
+                    localHgb && tabDptApplied -> "hgb_hybrid39_personalized_two_process"
+                    localHgb && tabDptStatus == "available_night_mismatch_not_applied" ->
+                        "hgb_available_night_mismatch_physical_only"
+                    localHgb && tabDptStatus == "available_infeasible_not_applied" ->
+                        "hgb_available_infeasible_physical_only"
+                    localHgb && tabDptAvailable -> "hgb_available_physical_only"
+                    localHgb -> "hgb_unavailable_physical_only"
+                    localTabDpt && tabDptApplied -> "local_tabdpt_hybrid39_personalized_two_process"
+                    localTabDpt && tabDptAvailable -> "local_tabdpt_available_physical_only"
+                    localTabDpt -> "local_tabdpt_unavailable_physical_only"
+                    tabDptApplied -> "tabdpt_hybrid39_personalized_two_process"
+                    tabDptStatus == "available_night_mismatch_not_applied" ->
+                        "tabdpt_available_night_mismatch_physical_only"
+                    tabDptStatus == "available_infeasible_not_applied" ->
+                        "tabdpt_available_infeasible_physical_only"
+                    tabDptAvailable -> "tabdpt_available_physical_only"
+                    tabDptEnabled -> "tabdpt_unavailable_physical_only"
+                    else -> "fusion_cmi_mesa"
+                },
+                usedFallback = evidenceStatus != "adequate" || (tabDptEnabled && !tabDptApplied),
                 explanation = r.explanation,
                 planFeasible = r.planFeasible,
                 generatedAtMs = decisionTime.toInstant().toEpochMilli(),
@@ -196,7 +268,13 @@ object NextNightModel {
             )
             result.copy(
                 recommendation = rec,
-                modelVersion = "분석: Two-Process · 예측·권장: $runtimeModelVersion" +
+                modelVersion = "분석: Two-Process · 예측: ${when {
+                    tabDptAvailable -> tabDptRuntime?.optString("model_version")
+                    tabDptEnabled && tabDptStatus == "not_requested_historical_reconstruction" ->
+                        "과거 재구성에서는 $predictionLabel 미실행"
+                    tabDptEnabled -> "$predictionLabel 사용 불가"
+                    else -> runtimeModelVersion
+                }}" +
                     (runtimePolicy?.let { " · 개인화: $it" } ?: ""),
                 // 옛 엔진 기준 제한 코드는 새 엔진에 해당하지 않아 뺀다 (Ridge 학습 전 · 14일 단계 · 목표 기상 없으면 권장 없음).
                 // 새 엔진 상황에 맞는 안내 문구는 화면 수정 때 (화면 수정 목록)

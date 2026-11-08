@@ -107,9 +107,8 @@ fun SleepTrendCard(
                     "${days}일 중 ${points.size}회 기록 · 평균 구간 ${durationText(average)}",
                     style = MaterialTheme.typography.bodyMedium
                 )
-                Text(
-                    if (mode == TrendMode.DURATION) "막대는 기록이 있는 날짜만 표시합니다."
-                    else "실선은 취침, 점선은 기상입니다. 기록이 빈 날짜 사이에는 선을 잇지 않습니다.",
+                if (mode == TrendMode.CLOCK) Text(
+                    "실선은 취침, 점선은 기상입니다. 기록이 빈 날짜 사이에는 선을 잇지 않습니다.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

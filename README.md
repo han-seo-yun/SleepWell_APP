@@ -1,18 +1,40 @@
 # SleepWell_APP
 
-Android 수면 기록·개인화 수면 계획 앱 **SleepWell 통합 v8**입니다. Samsung Health가 Health Connect에 공유한 수면 기록을 누적하고, 수면 이력의 DATA33 특징과 사용자 입력을 현재 모델의 개인화 예측에 사용합니다.
+Android 수면 기록·개인화 수면 계획 앱 **SleepWell 통합 v8**입니다. Samsung Health가 Health Connect에 공유한 수면 기록을 누적하고, 수면 이력의 DATA33 특징과 Two-Process 수리 특징을 경량 TabDPT 개인화 예측에 사용합니다.
 
 **저자: [Han Seoyun (han-seo-yun)](https://github.com/han-seo-yun)**
 
-패키지 `app.sleepwell` · 버전 `0.8.4` · 최종 통합 검증일 `2026-11-07`
+패키지 `app.sleepwell.offlinehgb` · 소스 버전 `0.8.7` · 최종 통합 검증일 `2026-11-08`
 
 ## 설치용 APK
 
-**[SleepWell v0.8.4 APK 바로 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.4/SleepWell-v0.8.4-debug.apk)**
+**[기존 SleepWell v0.8.4 APK 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.4/SleepWell-v0.8.4-debug.apk)**
 
-Android 10(API 29) 이상에서 설치할 수 있는 검증된 **디버그 서명 APK**입니다. 기존 앱과 서명이 같으면 데이터를 유지하며 업데이트 설치할 수 있습니다. 설치할 때 Android가 요청하면 다운로드에 사용한 앱의 설치 허용을 직접 설정하세요.
+이 링크는 현재 공개된 **이전 v0.8.4 릴리스**입니다. 이 커밋의 경량 TabDPT 0.8.7 APK 릴리스는 아직 게시하지 않았습니다. Android 10(API 29) 이상에서 설치할 수 있는 디버그 서명 APK이며, 기존 앱과 패키지·서명이 모두 같을 때만 데이터를 유지하며 업데이트됩니다.
 
 [릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.4) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.4/SHA256SUMS.txt)
+
+## v0.8.7 경량 TabDPT 하이브리드
+
+0.8.7의 실행 경로는 `DATA33 33개 + Two-Process 수리 특징 6개 → 경량 TabDPT → 기존 점진 개인화·권장 정책`입니다. CMI와 MESA는 데이터 코호트 이름이며 서로 다른 알고리즘 이름이 아닙니다. 두 코호트의 예측을 기존 앱 정책대로 결합하고, 실제 수면 기록·설문·목표 기상 시각과 개인화 정책을 이어서 적용합니다.
+
+모바일 모델은 TabDPT v1.3의 수정된 thinking-row 변환을 사용한 **문맥 1,024개·앙상블 2회** 설정입니다. 연구 비교의 전체 학습 문맥·앙상블 4회 설정과 같은 계열이지만 계산 설정은 다릅니다. 이 저장소의 0.8.7을 연구 원본과 완전히 동일한 실행 설정으로 설명하지 않습니다.
+
+모델 가중치와 CMI·MESA 학습 문맥은 약 256MB이며 원 연구 데이터에서 파생됐으므로 공개 저장소에 포함하지 않습니다. 코드만 복제한 뒤 검증된 내부 번들 경로를 지정해 준비합니다.
+
+```powershell
+.\tools\setup_light_tabdpt.ps1 -BundleDirectory "<검증된 TabDPT 번들 폴더>"
+```
+
+스크립트는 번들 9개 파일의 SHA-256을 모두 확인한 경우에만 `app/src/main/assets/tabdpt`로 복사합니다. 해당 폴더는 Git에서 제외됩니다. 해시가 다른 모델이나 학습 문맥을 같은 버전으로 빌드하지 않습니다.
+
+기존 HGB 비교 테스트까지 재현하려면 별도로 허가된 로컬 프로젝트의 HGB 이진 모델·golden 자료를 준비합니다. 이 자료도 Git에서 제외됩니다. 앱의 production 경로는 HGB를 사용하지 않습니다.
+
+```powershell
+.\tools\setup_legacy_hgb_tests.ps1 -LocalProjectDirectory "<검증된 기존 로컬 프로젝트>"
+```
+
+TabDPT 번들이 없으면 APK 빌드만으로 모델이 준비되는 것은 아닙니다. 코드만 복제한 상태를 모델 검증 완료 상태로 간주하지 마세요.
 
 ## 화면과 주요 기능
 
@@ -92,7 +114,7 @@ CSV 과거 기록 재분석 수정은 **v0.8.1부터 포함**됩니다. 상단 �
 
 ## 빌드 및 실행
 
-Android Studio에서 저장소를 열고 Android SDK 경로를 설정한 뒤 `app` 구성을 실행합니다. 로컬 SDK 경로는 각자의 `local.properties`에 두며 저장소에 포함하지 않습니다.
+먼저 위 스크립트로 검증된 경량 TabDPT 번들을 준비합니다. 그 다음 Android Studio에서 저장소를 열고 Android SDK 경로를 설정한 뒤 `app` 구성을 실행합니다. 로컬 SDK 경로와 모델 번들은 저장소에 포함하지 않습니다.
 
 | 항목 | 설정 |
 |---|---|
@@ -102,6 +124,7 @@ Android Studio에서 저장소를 열고 Android SDK 경로를 설정한 뒤 `ap
 | Kotlin Compose 플러그인 | 2.4.20 |
 | Compose BOM | 2026.09.00 |
 | Health Connect | 1.1.0 |
+| ONNX Runtime Android | 1.22.0 |
 | Gradle daemon JVM | 저장소 설정 25; 검증은 Android Studio 번들 JBR 사용 |
 | Java source/target | 11 |
 
@@ -121,7 +144,9 @@ macOS/Linux:
 
 ## 검증
 
-연령대 입력 제거 후 Android API 37 에뮬레이터에서 **208개 회귀 테스트 통과**, 앱·테스트 APK 빌드 성공, **lint 오류 0개 / 경고 8개**를 확인했습니다. 초기 설정·프로필 수정에서 연령 없이 저장되는지 검증했고, 내 정보와 수정 화면도 직접 확인했습니다. 기존 CSV·시간대·DATA33·개인화·동기화 회귀 검증도 포함합니다.
+경량 TabDPT의 로컬 상태 이름도 홈 권장 카드·그래프 구간·모델 안내 표시 조건에 포함했습니다. 최종 표시 회귀 16개를 추가 실행해 모두 통과했습니다.
+
+0.8.7은 Android 에뮬레이터에서 **기존 회귀 226개, 시간대 6개, 실제 경량 TabDPT 통합 2개 등 234개 검사 통과**, 앱·테스트 APK 빌드 성공, **lint 오류 0개**를 확인했습니다. 실제 모델 검사는 네트워크가 없는 상태에서 CMI·MESA 네 출력이 고정 golden과 1초 이내로 일치하는지 확인했습니다. 28일 메모리 내 수면 기록으로 DATA33→TabDPT→개인화 권장 경로와 기록 수·개인화 가중치도 확인했습니다.
 
 - CSV 일괄 가져오기 → 날짜별 DATA33·예측, 후일 기록·설문 배제, UTC/DST 경계, 저장 예측·재분석 구분
 - DATA33 누적, 단계 없는 수면, 중복·동시 저장, 측정 기반 개인화와 권장 정책
@@ -132,9 +157,9 @@ macOS/Linux:
 - 저장 설문 복원·부분 편집·과거 응답 보존, CSV 교체 실패 시 기존 파일 보존
 - 사용자 저장소와 분리된 UI fixture로 라이트·다크·큰 글꼴 확인
 
-프로필·설문·저장 결과·수면 원본·모델 입력·합친 수면·계산 CSV의 영구 파일 7개는 업데이트와 검증 전후 SHA-256이 같았습니다. 개인 기록·스크린샷·백업은 공개 저장소에 올리지 않았습니다. 실물 Samsung Health/Galaxy Watch의 **신규 기록 수신과 장시간 OS 백그라운드 실행은 이번 에뮬레이터 검증과 별도**입니다. GRADUAL_V1 런타임의 통계적 성능이 새로 검증됐다는 의미도 아닙니다.
+0.8.7 실기기 업데이트에서는 같은 패키지·서명을 확인하고 삭제 없이 설치했습니다. 설치 직후 저장 파일의 SHA-256이 모두 같았으며 실행 후 사용자 프로필도 보존됐습니다. 이전 릴리스의 영구 파일 7개 보존 검증과는 별도 결과입니다. 개인 기록·스크린샷·백업은 공개 저장소에 올리지 않았습니다. 실물 Samsung Health/Galaxy Watch의 **신규 기록 수신과 장시간 OS 백그라운드 실행은 이번 에뮬레이터 검증과 별도**입니다. 기존 A52s 독립 모델 검사에서는 준비된 모델의 반복 요청 중앙값 약 22초, 일부 요청 약 3분이 관측됐지만, 이는 완성된 0.8.7 앱의 지연 보증이 아닙니다. GRADUAL_V1 런타임이나 권장 수면 정책의 건강 효과가 새로 검증됐다는 의미도 아닙니다.
 
-자세한 재현 방법과 남은 경고는 [검증 안내](docs/VALIDATION.md)를 참고하세요.
+0.8.7 검증은 이 절을 기준으로 하며, [이전 검증 안내](docs/VALIDATION.md)는 과거 릴리스 기록입니다. 실기기는 잠금 상태여서 이번 업데이트 후 화면 수동 조작은 확인하지 않았습니다.
 
 ## 소스 구성
 
@@ -144,10 +169,10 @@ app/src/main/java/app/sleepwell/
   health/     # Health Connect·CSV 및 분석 인터페이스
   user/       # 모델·개인화·측정·권장 정책
   ui/         # 오늘·기록·내 정보와 그래프
-app/src/main/assets/       # 실행에 필요한 모델과 명시적 데모 자산
+app/src/main/assets/       # 공개 가능한 모델·명시적 데모 자산; TabDPT 번들은 로컬 준비
 app/src/androidTest/      # 회귀 테스트와 격리된 fixture
 gradle/                   # Wrapper 및 버전 카탈로그
 tools/                    # 테스트 fixture 생성 도구
 ```
 
-앱 코드·리소스·모델 자산·테스트·빌드 설정·개발 도구를 포함합니다. 빌드 산출물, 로컬 SDK 설정, 인증정보, 실제 수면·설문 데이터와 검증 백업은 제외합니다. 저장소의 `demo_*` 파일은 명시적 데모/검증 자산이며 실제 사용자 기록이 아닙니다.
+앱 코드·리소스·테스트·빌드 설정·개발 도구를 포함합니다. TabDPT 가중치·학습 문맥, 빌드 산출물, 로컬 SDK 설정, 인증정보, 실제 수면·설문 데이터와 검증 백업은 제외합니다. 저장소의 `demo_*` 파일은 명시적 데모/검증 자산이며 실제 사용자 기록이 아닙니다.

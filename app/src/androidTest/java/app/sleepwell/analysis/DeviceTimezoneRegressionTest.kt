@@ -11,6 +11,11 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.TimeZone
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.system.measureTimeMillis
+import kotlinx.coroutines.runBlocking
 
 @Suppress("DEPRECATION")
 class DeviceTimezoneRegressionTest : InstrumentationTestCase() {
@@ -87,8 +92,47 @@ class DeviceTimezoneRegressionTest : InstrumentationTestCase() {
         assertEquals(25 * 3_600_000L, days[2].startMs - days[1].startMs)
     }
 
+    fun testInstalledEngineTimezoneRefreshDoesNotWaitForBusyModelOnMainThread() {
+        verifyInstalledEngineTimezoneRefreshDoesNotWaitForBusyModelOnMainThread()
+    }
+
+    // Keep lambdas out of a JUnit3 method whose name starts with "test". The legacy runner
+    // otherwise discovers generated test...$lambda methods as separate, invalid tests.
+    private fun verifyInstalledEngineTimezoneRefreshDoesNotWaitForBusyModelOnMainThread() {
+        NextNightModel.install({ name ->
+            instrumentation.targetContext.assets.open(name).use { it.readBytes() }
+        }, ZoneId.of("Asia/Seoul"))
+        TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"))
+        val lockHeld = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val worker = Executors.newSingleThreadExecutor()
+        worker.execute {
+            synchronized(NextNightModel) {
+                lockHeld.countDown()
+                release.await(5, TimeUnit.SECONDS)
+            }
+        }
+        assertTrue(lockHeld.await(2, TimeUnit.SECONDS))
+
+        val elapsed = try {
+            measureTimeMillis {
+                instrumentation.runOnMainSync { UiZone.refreshFromSystem() }
+            }
+        } finally {
+            release.countDown()
+            worker.shutdown()
+        }
+
+        assertTrue("main-thread refresh waited ${elapsed}ms for the model lock", elapsed < 1_000)
+        assertTrue(worker.awaitTermination(3, TimeUnit.SECONDS))
+        runBlocking { UiZone.awaitRefresh() }
+        assertEquals("America/Los_Angeles", NextNightModel.currentCalculationZone().id)
+        assertEquals("America/Los_Angeles", UiZone.current.zoneId)
+    }
+
     // Legacy JUnit3 also discovers generated SAM methods starting with "test".
     private fun refreshZone() {
         instrumentation.runOnMainSync { UiZone.refreshFromSystem() }
+        runBlocking { UiZone.awaitRefresh() }
     }
 }

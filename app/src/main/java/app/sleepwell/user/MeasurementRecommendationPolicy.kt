@@ -37,7 +37,9 @@ internal object MeasurementRecommendationPolicy {
         val sleepDebtMinutes: Double?,
         val sleepDebtApplied: Boolean,
         val extensionMinutes: Double,
-        val napApplied: Boolean
+        val napApplied: Boolean,
+        val dataPreferenceApplied: Boolean,
+        val dataPreferredBed: ZonedDateTime?
     )
 
     fun nightId(now: ZonedDateTime, usualWake: LocalTime): LocalDate {
@@ -58,7 +60,13 @@ internal object MeasurementRecommendationPolicy {
         usualBed: LocalTime,
         usualWake: LocalTime,
         recentCompleteDiaries: List<CompleteDiary>,
-        completedNap: SleepInterval?
+        completedNap: SleepInterval?,
+        /**
+         * TabDPT's predicted onset, converted to time in bed, is only a bounded
+         * preference among candidates that already satisfy the wake and duration
+         * constraints. This engineering rule is not a validated efficacy claim.
+         */
+        dataPreferredBed: ZonedDateTime? = null
     ): Result {
         val recent = recentCompleteDiaries.filter { row ->
             val age = Duration.between(row.wake, now)
@@ -105,11 +113,16 @@ internal object MeasurementRecommendationPolicy {
                 positiveModulo(phaseMinutes - targetSleepMinutes / 2.0, 1440.0)
             } else clockMinutes(usualBed)
             val regularityHours = abs(clockDelta(clockMinutes(candidate), preferredBed)) / 60.0
-            val score = candidateS + candidateC - 0.08 * regularityHours - abs(offset) / 3000.0
+            val dataPenalty = dataPreferredBed?.let {
+                0.08 * minOf(abs(Duration.between(candidate, it).seconds / 60.0) / 60.0, 4.0)
+            } ?: 0.0
+            val score = candidateS + candidateC - 0.08 * regularityHours -
+                abs(offset) / 3000.0 - dataPenalty
             score to candidate
         }
         val enoughWindow = Duration.between(now, wake).seconds / 60.0 >= desired + latencyMinutes
-        var bed = candidates.maxByOrNull { it.first }?.second ?: now
+        val selectedCandidate = candidates.maxByOrNull { it.first }?.second
+        var bed = selectedCandidate ?: now
         val feasible = enoughWindow && !bed.isAfter(latestBed) && wake.isAfter(bed)
         if (!feasible) bed = minOf(now, wake)
         val opportunity = Duration.between(bed, wake).toMinutes().coerceAtLeast(0).toInt()
@@ -126,7 +139,10 @@ internal object MeasurementRecommendationPolicy {
             sleepDebtMinutes = debt,
             sleepDebtApplied = debt != null && evidenceAdequate,
             extensionMinutes = extension,
-            napApplied = validNap != null
+            napApplied = validNap != null,
+            dataPreferenceApplied = dataPreferredBed != null && selectedCandidate != null &&
+                enoughWindow && bed == selectedCandidate,
+            dataPreferredBed = dataPreferredBed
         )
     }
 

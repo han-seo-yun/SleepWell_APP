@@ -62,6 +62,7 @@ fun SavedResultsScreen() {
     var selectedRecordKey by rememberSaveable { mutableStateOf<String?>(null) }
     var monthText by rememberSaveable(zone.id) { mutableStateOf(YearMonth.from(Instant.ofEpochMilli(nowMs).atZone(zone)).toString()) }
     var showData by remember { mutableStateOf(false) }
+    var showDemoResults by rememberSaveable { mutableStateOf(false) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var clearMessage by remember { mutableStateOf<String?>(null) }
@@ -102,7 +103,10 @@ fun SavedResultsScreen() {
     }
     val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
     val month = runCatching { YearMonth.parse(monthText) }.getOrDefault(YearMonth.from(today))
-    val days = remember(history, results, zone) { HistoryCalendarProjection.days(history, results, zone) }
+    val hasDemoResults = remember(results) { results.any { it.source.isSyntheticSource() } }
+    val days = remember(history, results, surveys, zone, showDemoResults) {
+        HistoryCalendarProjection.days(history, results, zone, surveys, includeSyntheticResults = showDemoResults)
+    }
     val selectedDate = selectedDateText?.let { text -> runCatching { LocalDate.parse(text) }.getOrNull() }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
@@ -115,12 +119,17 @@ fun SavedResultsScreen() {
             onNext = { monthText = month.plusMonths(1).toString() },
             onToday = { monthText = YearMonth.from(today).toString(); selectedDateText = today.toString() },
             onSelect = { selectedDateText = it.toString(); openState = "day:$it" })
-        Spacer(Modifier.height(10.dp)); CalendarLegend(); Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp)); CalendarLegend()
+        if (hasDemoResults) Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("시연 재분석 결과 보기", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            Switch(checked = showDemoResults, onCheckedChange = { showDemoResults = it })
+        }
+        Spacer(Modifier.height(12.dp))
         if (selectedDate == null) {
-            Text("날짜를 누르면 수면 기록과 저장한 분석 결과를 함께 볼 수 있어요.",
+            Text("날짜를 누르면 수면 기록과 설문, 저장한 분석 결과를 함께 볼 수 있어요.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            val selected = days[selectedDate] ?: HistoryCalendarDay(selectedDate, emptyList(), emptyList())
+            val selected = days[selectedDate] ?: HistoryCalendarDay(selectedDate, emptyList(), emptyList(), emptyList())
             SelectedDaySummary(selected) { openState = "day:$selectedDate" }
         }
         if (days.isEmpty()) EmptyHistoryState()
@@ -153,7 +162,7 @@ fun SavedResultsScreen() {
     }
 
     selectedDate?.let { date ->
-        val selected = days[date] ?: HistoryCalendarDay(date, emptyList(), emptyList())
+        val selected = days[date] ?: HistoryCalendarDay(date, emptyList(), emptyList(), emptyList())
         if (openState == "day:$date") DayDetailSheet(selected, zone, onDismiss = { openState = null },
             onOpenSleep = { selectedRecordKey = it.recordKey(); openState = null },
             onOpenSaved = { openState = "saved:$date" })
@@ -213,8 +222,10 @@ internal fun HistoryCalendar(month: YearMonth, today: LocalDate, selected: Local
     val chosen = date == selected
     Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { onSelect(date) }.semantics {
         role = Role.Button; contentDescription = "${date.monthValue}월 ${date.dayOfMonth}일" +
-            when { entry?.hasSleep == true && entry.hasSavedResult -> ", 수면 기록과 저장 결과 있음"; entry?.hasSleep == true -> ", 수면 기록 있음";
-                entry?.hasSavedResult == true -> ", 저장 결과 있음"; else -> ", 기록 없음" }
+            listOfNotNull("수면 기록".takeIf { entry?.hasSleep == true }, "설문".takeIf { entry?.hasSurvey == true },
+                "저장 결과".takeIf { entry?.hasSavedResult == true }).let { found ->
+                if (found.isEmpty()) ", 기록 없음" else ", ${found.joinToString("과")} 있음"
+            }
     }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Surface(shape = CircleShape, color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
             border = if (date == today && !chosen) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
@@ -223,13 +234,15 @@ internal fun HistoryCalendar(month: YearMonth, today: LocalDate, selected: Local
         } }
         Row(Modifier.height(10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (entry?.hasSleep == true) Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.secondary, CircleShape))
+            if (entry?.hasSurvey == true) Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
             if (entry?.hasSavedResult == true) Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape))
         }
     }
 }
 
 @Composable private fun CalendarLegend() = Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-    LegendDot(MaterialTheme.colorScheme.secondary, "수면 기록"); LegendDot(MaterialTheme.colorScheme.tertiary, "저장한 분석 결과")
+    LegendDot(MaterialTheme.colorScheme.secondary, "수면 기록"); LegendDot(MaterialTheme.colorScheme.primary, "설문")
+    LegendDot(MaterialTheme.colorScheme.tertiary, "저장한 분석 결과")
 }
 @Composable private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) = Row(verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(6.dp)) { Box(Modifier.size(7.dp).background(color, CircleShape)); Text(label, style = MaterialTheme.typography.labelSmall) }
@@ -240,8 +253,8 @@ internal fun HistoryCalendar(month: YearMonth, today: LocalDate, selected: Local
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("${day.date.monthValue}/${day.date.dayOfMonth}(${dayOfWeekKo(day.date)})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("수면 기록 ${day.sleepRecords.size}개 · 저장 결과 ${day.savedResults.size}개")
-                if (!day.hasSleep && !day.hasSavedResult) Text("기록 없음 · 0시간으로 계산하지 않아요.", style = MaterialTheme.typography.bodySmall,
+                Text("수면 ${day.sleepRecords.size}개 · 설문 ${day.surveys.size}개 · 저장 결과 ${day.savedResults.size}개")
+                if (!day.hasSleep && !day.hasSurvey && !day.hasSavedResult) Text("기록 없음 · 0시간으로 계산하지 않아요.", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }; Text("›")
         }
@@ -262,11 +275,25 @@ internal fun HistoryCalendar(month: YearMonth, today: LocalDate, selected: Local
             Text("현재 기기 시간대 · ${zone.id}", style = MaterialTheme.typography.bodySmall)
             if (day.sleepRecords.isEmpty()) Text("수면 기록이 없어요.")
             day.sleepRecords.forEach { night -> SleepSummaryRow(night, zone) { onOpenSleep(night) } }
+            HorizontalDivider(); Text("그날 설문", style = MaterialTheme.typography.titleMedium)
+            if (day.surveys.isEmpty()) Text("저장한 설문이 없어요.") else day.surveys.forEach { survey ->
+                SurveyHistorySummary(survey, zone)
+            }
             HorizontalDivider(); Text("저장한 분석 결과", style = MaterialTheme.typography.titleMedium)
             if (day.savedResults.isEmpty()) Text("저장한 결과가 없어요.") else {
                 day.savedResults.forEach { SavedSummaryRow(it) }
                 OutlinedButton(onClick = onOpenSaved, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("저장 결과 ${day.savedResults.size}개 자세히 보기") }
             }
+        }
+    }
+}
+
+@Composable private fun SurveyHistorySummary(survey: SurveyDay, zone: ZoneId) {
+    val label = if (survey.sleepWakeDate != null) "기상 후 입력" else "수면 준비 · 취침 전 입력"
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.padding(14.dp)) {
+            Text(label, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Text(survey.summaryIn(zone), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -322,11 +349,11 @@ internal fun HistoryCalendar(month: YearMonth, today: LocalDate, selected: Local
                     replay?.display != null -> { ModelRhythmCard(replay!!.display, replay!!.display!!.referenceMs); AnalysisContent(
                         d = replay!!.display!!, sourceName = selectedResult?.source.orEmpty(), zone = UiZone.current,
                         onAskTargetWake = {}, onSave = null, showSchedule = false) }
-                    selectedResult != null && snapshotId == null -> Text("선택한 결과는 스냅샷 저장 기능 전에 저장되어 요약만 볼 수 있어요.")
+                    selectedResult != null && snapshotId == null -> Text("이 결과에는 그래프 스냅샷이 없어 저장된 요약을 표시해요.")
                     else -> Text(replay?.error?.title ?: "저장한 분석을 불러오지 못했어요.", color = MaterialTheme.colorScheme.error) }
                 selectedResult?.let { result ->
                     val saved = SimpleDateFormat("M/d(E) HH:mm", Locale.KOREA).apply { timeZone = UiZone.current.tz }.format(Date(result.savedAtMs))
-                    Text("위 그래프 · $saved 저장 결과", style = MaterialTheme.typography.labelSmall,
+                    Text(if (replay?.display != null) "위 그래프 · $saved 저장 결과" else "$saved 저장 결과", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(20.dp)); Text("저장한 일정", style = MaterialTheme.typography.titleMedium)

@@ -627,7 +627,9 @@ object AnalysisPresenter {
             if (s0 != null && e0 != null && e0 > s0 && e0 > fromMs && s0 < toMs) PlanBand(maxOf(s0, fromMs), minOf(e0, toMs), k) else null
         return listOfNotNull(
             band(rec.predictedBedTimeMs, rec.predictedWakeTimeMs, PlanKind.PREDICTED),
-            if (direct?.targetWakeMs != null || rec.modelStatus == "fusion_cmi_mesa") band(rec.recommendedBedTimeMs, rec.recommendedWakeTimeMs, PlanKind.RECOMMENDED) else null
+            if (direct?.targetWakeMs != null || rec.modelStatus == "fusion_cmi_mesa" ||
+                (rec.modelStatus.startsWith("tabdpt_") || rec.modelStatus.startsWith("local_tabdpt_")) || rec.modelStatus.startsWith("hgb_"))
+                band(rec.recommendedBedTimeMs, rec.recommendedWakeTimeMs, PlanKind.RECOMMENDED) else null
         )
     }
 
@@ -729,7 +731,23 @@ object AnalysisPresenter {
         val main = sleeps.filter { it.minutes >= MAIN_SLEEP_MIN && it.endMs <= refMs + MIN_MS }
         val trained = rec != null && !rec.usedFallback && rec.modelStatus == "hybrid_trained"
         val status = ScheduleStatus(
-            if (rec?.modelStatus == "fusion_cmi_mesa") {
+            if ((rec?.modelStatus?.startsWith("tabdpt_") == true || rec?.modelStatus?.startsWith("local_tabdpt_") == true) || rec?.modelStatus?.startsWith("hgb_") == true) {
+                when (rec.modelStatus) {
+                    "local_tabdpt_hybrid39_personalized_two_process" -> "기기 내 경량 TabDPT · 개인화 Two-Process 권장"
+                    "local_tabdpt_available_physical_only" -> "경량 TabDPT 예상 · 이번 권장은 Two-Process 기준"
+                    "local_tabdpt_unavailable_physical_only" -> "경량 TabDPT 사용 불가 · Two-Process 권장"
+                    "hgb_hybrid39_personalized_two_process" -> "기기 내 HGB · 개인화 Two-Process 권장"
+                    "hgb_available_night_mismatch_physical_only" -> "HGB 예상은 다음 밤 · 이번 밤은 Two-Process 권장"
+                    "hgb_available_infeasible_physical_only" -> "HGB 예상은 확인 · 현재 제약에서는 Two-Process 권장"
+                    "hgb_available_physical_only" -> "기기 내 HGB 예상 · Two-Process 권장"
+                    "hgb_unavailable_physical_only" -> "기기 내 HGB 사용 불가 · Two-Process 권장"
+                    "tabdpt_hybrid39_personalized_two_process" -> "TabDPT 하이브리드 · 개인화 Two-Process 권장"
+                    "tabdpt_data33_personalized_two_process" -> "TabDPT DATA33 · 개인화 Two-Process 권장"
+                    "tabdpt_available_night_mismatch_physical_only" -> "TabDPT 예상은 다음 밤 · 이번 밤은 Two-Process 권장"
+                    "tabdpt_available_infeasible_physical_only" -> "TabDPT 예상은 확인 · 현재 제약에서는 Two-Process 권장"
+                    else -> "TabDPT 연결 불가 · Two-Process 권장"
+                }
+            } else if (rec?.modelStatus == "fusion_cmi_mesa") {
                 "CMI·MESA · 점진 예측 개인화 · " +
                     if (rec.evidenceStatus == "adequate") "수면 기록 기반 개인화" else "설정한 수면 목표 유지"
             } else if (trained) "개인 보정 모델" + (rec?.residualModelVersion?.let { " ($it)" } ?: "") else "임시 모델",
@@ -763,7 +781,10 @@ object AnalysisPresenter {
 
         val target = direct?.targetWakeMs
         val recBed = rec?.recommendedBedTimeMs
-        val recommended = if (rec != null && recBed != null && (target != null || rec.modelStatus == "fusion_cmi_mesa") && (rec.recommendedSleepMin ?: 0.0) > 0.0) ScheduleRecommendation(
+        val recommended = if (rec != null && recBed != null &&
+            (target != null || rec.modelStatus == "fusion_cmi_mesa" || (rec.modelStatus.startsWith("tabdpt_") || rec.modelStatus.startsWith("local_tabdpt_")) ||
+                rec.modelStatus.startsWith("hgb_")) &&
+            (rec.recommendedSleepMin ?: 0.0) > 0.0) ScheduleRecommendation(
             // (v6) 새 모델은 권장 기상 = 알람과 평소 기상 중 이른 쪽 → 알람이 아니라 실제로 계산에 쓴 기상 시각을 보여 준다
             //      (알람 09:00 · 평소 07:20 이면 "07:20에 일어나려면 …" — 취침 시각과 짝이 맞게)
             targetWakeText = w(rec.recommendedWakeTimeMs ?: target ?: recBed),

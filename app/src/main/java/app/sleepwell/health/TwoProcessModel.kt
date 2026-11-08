@@ -35,6 +35,23 @@ object TwoProcessModel {
     private const val AMPLITUDE: Double = 0.15
     private const val TAU_C_HOURS: Double = 24.0   // 일주기 주기 (시간)
 
+    /**
+     * Advance Process S through one known or hypothetical state interval.
+     *
+     * This exposes the same transition used by [compute] so display-only scenarios do not
+     * duplicate or drift from the model constants. It does not classify sleep or change a
+     * prediction; callers must supply the state and duration explicitly.
+     */
+    fun advanceProcessS(currentS: Double, durationMs: Long, isSleep: Boolean): Double {
+        if (durationMs <= 0L) return currentS
+        val durationHours = durationMs / 3_600_000.0
+        return if (isSleep) {
+            S_LOWER + (currentS - S_LOWER) * exp(-durationHours / TAU_SLEEP_H)
+        } else {
+            S_UPPER - (S_UPPER - currentS) * exp(-durationHours / TAU_WAKE_H)
+        }
+    }
+
     // ────────────────────────────────────────────────
     // 1. 과거~현재 S·C_sleep·propensity 계산
     // ────────────────────────────────────────────────

@@ -117,6 +117,8 @@ import app.sleepwell.health.SleepRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -162,6 +164,14 @@ private data class Computed(
     val result: AnalysisResult, val direct: DirectInput?, val condition: Int?, val survey: SurveyDay? = null,
     val input: SavedSnapshot.CapturedInput? = null, val modelInputs: ModelInputs = ModelInputs.capture(),
     val source: String = "내 수면 기록"
+)
+private data class AnalysisWork(
+    val result: HealthResult<AnalysisResult>,
+    val importedNights: List<app.sleepwell.user.SleepRecord>,
+    val reanalysisCandidates: List<app.sleepwell.user.SleepRecord>,
+    val diaryCount: Int,
+    val historyNights: List<SleepHistoryNight>,
+    val sourceName: String
 )
 /** The result actually on screen, together with the exact inputs and presentation references. */
 private data class DisplayedCalculation(
@@ -218,6 +228,7 @@ fun AnalysisScreen() {
     var saving by remember { mutableStateOf(false) }
     var analysisJob by remember { mutableStateOf<Job?>(null) }
     var analysisGeneration by remember { mutableStateOf(0) }
+    val analysisMutex = remember { Mutex() }
     val capturedInputs = remember { mutableListOf<SavedSnapshot.CapturedInput>() }
     DisposableEffect(Unit) {
         onDispose { capturedInputs.forEach { SavedSnapshot.releaseCapturedInput(context.filesDir, it) } }
@@ -296,40 +307,58 @@ fun AnalysisScreen() {
             var frozenModelInputs = ModelInputs.capture()
             var analysisSource = sourceName ?: "내 수면 기록"
             try {
-                val result = withContext(Dispatchers.Default) {
-                    synchronized(NextNightModel) {
+                val work = withContext(Dispatchers.IO) {
+                    analysisMutex.withLock {
+                        if (generation != analysisGeneration) return@withLock null
                         val who = "me"
-                        NextNightModel.surveyDays = SurveyStore.load(surveyFile).filter { it.participant == who }
+                        val surveyDays = SurveyStore.load(surveyFile).filter { it.participant == who }
+                        NextNightModel.surveyDays = surveyDays
                         NextNightModel.demoMode = false
+                        var workImportedNights = emptyList<app.sleepwell.user.SleepRecord>()
+                        var workReanalysisCandidates = emptyList<app.sleepwell.user.SleepRecord>()
+                        var workDiaryCount = 0
+                        var workHistoryNights = emptyList<SleepHistoryNight>()
+                        var workSourceName = analysisSource
                         try {
-                            NextNightModel.diaryRecords = DiaryStore.load(diaryFile)
+                            val diaryRecords = DiaryStore.load(diaryFile)
+                            NextNightModel.diaryRecords = diaryRecords
                             val analysisNow = System.currentTimeMillis()
                             NextNightModel.wearablePersonalizationEnabled = true
-                            importedNights = ImportedSleepStore.loadModelNights(dataDir, analysisNow, emptyList())
-                            reanalysisCandidates = ImportedSleepStore.loadReanalysisCandidates(dataDir, analysisNow)
-                            NextNightModel.importedRecords = ImportedSleepStore.loadModelNights(dataDir, analysisNow, NextNightModel.surveyDays)
-                            diaryCount = NextNightModel.diaryRecords.size
-                            historyNights = SleepHistoryUi.load(context, analysisNow)
-                            analysisSource = if (historyNights.isEmpty()) "입력한 수면 습관 (반영 가능한 주 수면 기록 없음)"
-                                else historyNights.map { it.sourceLabel }.distinct().joinToString(" · ")
+                            workImportedNights = ImportedSleepStore.loadModelNights(dataDir, analysisNow, emptyList())
+                            workReanalysisCandidates = ImportedSleepStore.loadReanalysisCandidates(dataDir, analysisNow)
+                            NextNightModel.importedRecords = ImportedSleepStore.loadModelNights(dataDir, analysisNow, surveyDays)
+                            workDiaryCount = diaryRecords.size
+                            workHistoryNights = SleepHistoryUi.load(context, analysisNow)
+                            workSourceName = if (workHistoryNights.isEmpty()) "입력한 수면 습관 (반영 가능한 주 수면 기록 없음)"
+                                else workHistoryNights.map { it.sourceLabel }.distinct().joinToString(" · ")
                             val features = survey?.featureValues() ?: emptyMap()
                             frozenInput = if (fileReady && uploaded.isFile) SavedSnapshot.captureInput(context.filesDir, uploaded) else null
                             frozenModelInputs = ModelInputs.capture()
                             val sensorResult = frozenInput?.let { AnalysisRunner.runFile(it.file, direct, features) }
-                            if (sensorResult is HealthResult.Success) sensorResult
-                            else if (frozenInput == null || importedNights.isNotEmpty())
+                            val healthResult = if (sensorResult is HealthResult.Success) sensorResult
+                            else if (frozenInput == null || workImportedNights.isNotEmpty())
                                 HealthResult.Success(AnalysisRunner.runDiary(direct, features, analysisNow))
                             else sensorResult!!
-                        } catch (e: Exception) { HealthResult.Failure(e) }
+                            AnalysisWork(healthResult, workImportedNights, workReanalysisCandidates,
+                                workDiaryCount, workHistoryNights, workSourceName)
+                        } catch (e: Exception) {
+                            AnalysisWork(HealthResult.Failure(e), workImportedNights, workReanalysisCandidates,
+                                workDiaryCount, workHistoryNights, workSourceName)
+                        }
                     }
-                }
+                } ?: return@launch
                 ensureActive()
                 if (generation != analysisGeneration) return@launch
                 // Completed calculations replace the owner lease; in-flight display/save jobs hold their own.
                 capturedInputs.forEach { SavedSnapshot.releaseCapturedInput(context.filesDir, it) }
                 capturedInputs.clear()
-                sourceName = analysisSource
-                when (result) {
+                importedNights = work.importedNights
+                reanalysisCandidates = work.reanalysisCandidates
+                diaryCount = work.diaryCount
+                historyNights = work.historyNights
+                analysisSource = work.sourceName
+                sourceName = work.sourceName
+                when (val result = work.result) {
                     is HealthResult.Success -> {
                         frozenInput?.let { capturedInputs += it }
                         handedOff = true
@@ -494,7 +523,8 @@ fun AnalysisScreen() {
                         runAnalysis(appliedInput, appliedCondition, appliedSurvey, preserveSelection = true)
                     }
                 } else {
-                    hcMessage = "수면 기록 ${r.sessionCount}건을 읽었어요 · ${AnalysisPresenter.dayTime(System.currentTimeMillis())} 확인"
+                    hcMessage = "수면 기록 ${r.sessionCount}건을 읽었어요 · ${AnalysisPresenter.dayTime(System.currentTimeMillis())} 확인" +
+                        (r.lastMs?.let { "\n이번에 받은 마지막 수면 종료 ${AnalysisPresenter.dayTime(it)}" } ?: "")
                     analyzeStored(preserveForm = true) {
                         SleepDataStore.saveHealthConnect(dataDir, r.csv, source = if (r.fromSamsung) "samsung_health" else "health_connect")
                     }
@@ -585,7 +615,15 @@ fun AnalysisScreen() {
     //  - 오늘 → 현재 시각 기준으로 권장 갱신. 최근 기록이 있으면 그래프도 현재까지 계산
     //  - 지난 날     → 그날 아침 기상 시각(없으면 낮 12시)을 기준 시각으로 한 번 다시 계산
     //                  + 그날 설문 기록에 알람이 있으면 목표 기상으로 넣어 권장까지 계산
-    LaunchedEffect(computed, selectedNight, zone, nowMs / 60_000) {
+    // Do not cancel a native offline inference at each minute tick: a cold run can take minutes.
+    var liveRefreshTick by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000)
+            if (!nightLoading && !loading) liveRefreshTick++
+        }
+    }
+    LaunchedEffect(computed, selectedNight, zone, liveRefreshTick) {
         val c = computed ?: return@LaunchedEffect
         val calculationLease = try { c.input?.let { SavedSnapshot.retainCapturedInput(context.filesDir, it) } }
             catch (e: Exception) { nightError = Notice("계산 파일을 열지 못했어요", listOf(e.message.orEmpty())); return@LaunchedEffect }
@@ -597,7 +635,7 @@ fun AnalysisScreen() {
             val days = AnalysisPresenter.days(base.sleepRecords, c.direct, latestRef, dataStart)
             val sel = selectedNight?.let { k -> AnalysisPresenter.dayStartOf(k).let { st -> days.firstOrNull { it.startMs == st } } }
             nightError = null
-            nightLoading = false
+            nightLoading = true
             if (sel == null || sel.isLatest) {
                 val who = "me"
                 val observedSurvey = withContext(Dispatchers.IO) {
@@ -612,13 +650,13 @@ fun AnalysisScreen() {
                 val alarmMs = liveSurvey?.nextAlarmAfter(Instant.ofEpochMilli(nowMs))?.toEpochMilli()
                 val liveDirect = if (alarmMs != null) (c.direct ?: DirectInput(null, null, null, null)).copy(targetWakeMs = alarmMs)
                     else c.direct?.copy(targetWakeMs = c.direct.targetWakeMs?.takeIf { it > nowMs })
-                val liveComputed = withContext(Dispatchers.Default) {
-                    synchronized(NextNightModel) {
-                    val live = AnalysisRunner.runCurrent(
-                        c.input?.file ?: uploaded, base, liveDirect, liveSurvey?.featureValues() ?: emptyMap(), nowMs,
-                        contextObservedAtMs = observedSurvey?.observedAt?.toEpochMilli()
-                    )
-                    Computed(live, liveDirect, liveSurvey?.fatigue, liveSurvey, c.input, ModelInputs.capture(), c.source)
+                val liveComputed = withContext(Dispatchers.IO) {
+                    analysisMutex.withLock {
+                        val live = AnalysisRunner.runCurrent(
+                            c.input?.file ?: uploaded, base, liveDirect, liveSurvey?.featureValues() ?: emptyMap(), nowMs,
+                            contextObservedAtMs = observedSurvey?.observedAt?.toEpochMilli()
+                        )
+                        Computed(live, liveDirect, liveSurvey?.fatigue, liveSurvey, c.input, ModelInputs.capture(), c.source)
                     }
                 }
                 display = AnalysisPresenter.build(liveComputed.result, null, direct = liveDirect, condition = liveSurvey?.fatigue,
@@ -655,8 +693,8 @@ fun AnalysisScreen() {
             // (임시) 수면시간 목표를 그날 기상까지의 기록으로 — 엔진은 파일 전체로 세서 미래 기록이 섞임 (AnalysisRunner.sleepTargetUntil 참고)
             val sleepTarget = AnalysisRunner.sleepTargetUntil(base.sleepRecords, sel.basisMs)
             val observedAtMs = observedSurvey?.observedAt?.toEpochMilli()
-            val (res, pastModelInputs) = nightCache[sel.startMs] ?: withContext(Dispatchers.Default) {
-                synchronized(NextNightModel) {
+            val (res, pastModelInputs) = nightCache[sel.startMs] ?: withContext(Dispatchers.IO) {
+                analysisMutex.withLock {
                 NextNightModel.surveyDays = allSurveys
                 // Use the raw captured import list and only answers known before this date's cutoff.
                 // Pass inputs explicitly; no temporary mutation of live imports during background sync.
@@ -681,7 +719,7 @@ fun AnalysisScreen() {
                         historicalDataCutoffMs = inputCutoffMs.takeIf { csvReanalysis }
                     )
                 )
-                result to inputs
+                    result to inputs
                 }
             }.also { nightCache[sel.startMs] = it }
             display = withContext(Dispatchers.Default) {
@@ -702,6 +740,7 @@ fun AnalysisScreen() {
             }
             nightLoading = false
         } finally {
+            nightLoading = false
             SavedSnapshot.releaseCapturedInput(context.filesDir, calculationLease)
         }
     }
@@ -803,9 +842,9 @@ fun AnalysisScreen() {
             java.time.ZoneId.of(zone.zoneId), backgroundState, onOpen = { showConnection = true })
         LatestSleepCard(historyNights, java.time.ZoneId.of(zone.zoneId),
             onConnect = { showConnection = true }, nowMs = nowMs)
-        if (loading) Row(verticalAlignment = Alignment.CenterVertically) {
+        if (loading || nightLoading) Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.height(24.dp).width(24.dp))
-            Text("  저장된 기록으로 계산 중…", style = MaterialTheme.typography.bodyMedium)
+            Text("  수면 계획 계산 중… 첫 계산은 수 분 걸릴 수 있어요.", style = MaterialTheme.typography.bodyMedium)
         }
         error?.let { InfoCard(it.title, it.lines, MaterialTheme.colorScheme.errorContainer) }
         display?.let { d ->
@@ -835,7 +874,7 @@ fun AnalysisScreen() {
                 rec.personalizationStatus?.let { Text("개인화 상태 · $it", style = MaterialTheme.typography.bodySmall) }
                 rec.residualModelVersion?.let { Text("모델 · $it", style = MaterialTheme.typography.bodySmall) }
             }
-            Text("워치 수면 ${importedNights.size}개 · 직접 일지 ${diaryCount}개 · 같은 밤은 일지 우선으로 DATA33·개인화에 반영해요.",
+            Text("워치 수면 ${importedNights.size}개 · 직접 일지 ${diaryCount}개 · 같은 밤은 일지 우선으로 하이브리드 예측·개인화에 반영해요.",
                 style = MaterialTheme.typography.bodySmall, color = COLOR_NOTE)
             when {
                 nightLoading -> CircularProgressIndicator()
@@ -875,6 +914,8 @@ fun AnalysisScreen() {
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("연결·데이터", style = MaterialTheme.typography.headlineSmall)
             Text("삼성 헬스가 헬스 커넥트에 공유한 수면을 먼저 불러옵니다. 앱 진입·복귀와 사용 중 15분마다 새 기록을 확인해요.", style = MaterialTheme.typography.bodyMedium)
+            Text("현재 수면·각성 상태: 이 연결 경로에서는 제공되지 않아요.", style = MaterialTheme.typography.bodyMedium)
+            Text("수면이 끝난 뒤 공유된 기록을 반영합니다. 새 기록 확인 시각은 워치의 실시간 측정 시각과 달라요.", style = MaterialTheme.typography.bodySmall, color = COLOR_NOTE)
             Button(onClick = { connectHealthConnect() }, enabled = !hcBusy && !loading, modifier = Modifier.fillMaxWidth()) {
                 Text(if (hcBusy) "불러오는 중…" else if (healthConnected == true) "지금 새 기록 확인" else "삼성 헬스 연결하기")
             }

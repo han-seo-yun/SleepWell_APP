@@ -7,6 +7,7 @@ import app.sleepwell.health.DisplaySettings
 import app.sleepwell.health.DisplayZone
 import app.sleepwell.analysis.NextNightModel
 import java.time.ZoneId
+import kotlinx.coroutines.*
 
 /**
  * 기기 시간대를 따르는 화면 상태.
@@ -17,14 +18,35 @@ import java.time.ZoneId
  */
 object UiZone {
     private var state by mutableStateOf(DisplaySettings.zone)
+    private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var refreshJob: Job? = null
+    private var requestedZone: String? = null
+
+    internal suspend fun awaitRefresh() { refreshJob?.join() }
 
     val current: DisplayZone get() = state
 
     /** MainActivity의 시작·재개·시간대 변경 수신 시 메인 스레드에서 호출한다. */
     fun refreshFromSystem() {
         val current = DisplayZone.systemDefault()
-        NextNightModel.refreshCalculationZone(ZoneId.of(current.zoneId))
-        DisplaySettings.zone = current
-        state = current
+        if (!NextNightModel.isInstalled) {
+            NextNightModel.refreshCalculationZone(ZoneId.of(current.zoneId))
+            DisplaySettings.zone = current
+            state = current
+            return
+        }
+        if (current == state && NextNightModel.currentCalculationZone().id == current.zoneId && refreshJob?.isActive != true) return
+        if (requestedZone == current.zoneId && refreshJob?.isActive == true) return
+        requestedZone = current.zoneId
+        refreshJob?.cancel()
+        refreshJob = refreshScope.launch {
+            // An offline inference holds the engine lock for minutes. Never wait on the UI thread.
+            withContext(Dispatchers.Default) {
+                NextNightModel.refreshCalculationZone(ZoneId.of(current.zoneId))
+            }
+            // Publish calculation and display zones together; cancellation discards older requests.
+            DisplaySettings.zone = current
+            state = current
+        }
     }
 }

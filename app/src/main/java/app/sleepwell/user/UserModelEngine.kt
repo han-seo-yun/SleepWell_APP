@@ -9,6 +9,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.UUID
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -36,22 +37,37 @@ data class EngineOutput(
 class UserModelEngine private constructor(
     private val fusionFactory: () -> PortableFusionModel,
     private val populationLoader: () -> ByteArray,
-    private val calculationZone: ZoneId
+    private val calculationZone: ZoneId,
+    private val tabDptProvider: TabDptPredictionProvider?
 ) {
     constructor(context: Context, calculationZone: ZoneId = DEFAULT_ZONE) : this(
         fusionFactory = { PortableFusionModel(context, calculationZone) },
         populationLoader = { context.assets.open("models/population_prior.json").use { it.readBytes() } },
-        calculationZone = calculationZone
+        calculationZone = calculationZone,
+        tabDptProvider = null
+    )
+
+    internal constructor(
+        context: Context,
+        tabDptProvider: TabDptPredictionProvider?,
+        calculationZone: ZoneId = DEFAULT_ZONE
+    ) : this(
+        fusionFactory = { PortableFusionModel(context, calculationZone) },
+        populationLoader = { context.assets.open("models/population_prior.json").use { it.readBytes() } },
+        calculationZone = calculationZone,
+        tabDptProvider = tabDptProvider
     )
 
     internal constructor(
         assetLoader: (String) -> ByteArray,
         testable: Boolean = true,
-        calculationZone: ZoneId = DEFAULT_ZONE
+        calculationZone: ZoneId = DEFAULT_ZONE,
+        tabDptProvider: TabDptPredictionProvider? = null
     ) : this(
         fusionFactory = { PortableFusionModel(assetLoader, testable, calculationZone) },
         populationLoader = { assetLoader("models/population_prior.json") },
-        calculationZone = calculationZone
+        calculationZone = calculationZone,
+        tabDptProvider = tabDptProvider
     )
     companion object {
         internal val DEFAULT_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
@@ -112,10 +128,31 @@ class UserModelEngine private constructor(
             profile, forecastInputRecords, cutoff, inputPolicy = inputPolicy,
             observedThrough = now.takeIf { liveServiceObservation }
         )
+        // Historical reconstruction can invoke this engine once per day. Keep it offline and
+        // reproducible instead of turning one chart action into many slow server requests.
+        val tabDptResult = if (tabDptProvider != null && !historicalEvaluation) {
+            tabDptProvider.predict(UUID.randomUUID().toString(), result.snapshots)
+        } else null
+        val tabDptPrediction = (tabDptResult as? TabDptResult.Success)?.prediction
+        val predictionBackend = when (tabDptResult) {
+            is TabDptResult.Success -> tabDptResult.prediction.backend
+            is TabDptResult.Unavailable -> tabDptResult.backend
+            null -> (tabDptProvider as? PredictionProviderMetadata)?.backend
+                ?: PredictionBackend.SERVER_TABDPT
+        }
         val appPersonalization = personalize(
             profile, liveInputRecords, personalizationNow,
             questionnaireBoundaryInclusive = !historicalEvaluation
         )
+        tabDptPrediction?.let { prediction ->
+            result.predictions
+                .put("${prediction.backend.predictionKey}_cmi", tabDptPredictionJson(
+                    cutoff, prediction.cmiOnsetOffset, prediction.cmiWakeOffset,
+                    appPersonalization.latencyMinutes, prediction.backend))
+                .put("${prediction.backend.predictionKey}_mesa", tabDptPredictionJson(
+                    cutoff, prediction.mesaOnsetOffset, prediction.mesaWakeOffset,
+                    appPersonalization.latencyMinutes, prediction.backend))
+        }
         val usualWake = LocalTime.parse(profile.usualWake)
         val recommendationNightId = MeasurementRecommendationPolicy.nightId(localNow, usualWake)
         val recommendationCutoff = recommendationNightId.atTime(20, 0).atZone(calculationZone)
@@ -126,8 +163,8 @@ class UserModelEngine private constructor(
         }
         val hybridCmi = result.predictions.getJSONObject("hybrid_cmi")
         val hybridMesa = result.predictions.getJSONObject("hybrid_mesa")
-        val cmiBed = hybridCmi.getDouble("onset_offset_min")
-        val mesaBed = hybridMesa.getDouble("onset_offset_min")
+        val cmiBed = tabDptPrediction?.cmiOnsetOffset ?: hybridCmi.getDouble("onset_offset_min")
+        val mesaBed = tabDptPrediction?.mesaOnsetOffset ?: hybridMesa.getDouble("onset_offset_min")
         val behaviorBed = (cmiBed + mesaBed) / 2.0
 
         val wakeDate = recommendationNightId.plusDays(1)
@@ -151,6 +188,14 @@ class UserModelEngine private constructor(
             val end = context.napEnd?.let { runCatching { Instant.parse(it).atZone(calculationZone) }.getOrNull() }
             if (start != null && end != null) MeasurementRecommendationPolicy.SleepInterval(start, end) else null
         }
+        // After midnight the forecast cutoff belongs to the following night while the live
+        // recommendation still belongs to the previous night. Never apply mismatched-night data.
+        val tabDptPreferredBed = tabDptPrediction?.takeIf {
+            recommendationNightId == cutoff.toLocalDate()
+        }?.let {
+            // The behavior model predicts sleep onset; policy candidates represent time in bed.
+            addMinutes(cutoff, it.meanOnsetOffset - appPersonalization.latencyMinutes)
+        }
         val policy = MeasurementRecommendationPolicy.plan(
             now = localNow,
             wake = constrainedWake,
@@ -162,7 +207,8 @@ class UserModelEngine private constructor(
             usualBed = LocalTime.parse(profile.usualBed),
             usualWake = usualWake,
             recentCompleteDiaries = completeDiaries,
-            completedNap = completedNap
+            completedNap = completedNap,
+            dataPreferredBed = tabDptPreferredBed
         )
         val desiredBedtime = constrainedWake.minus(
             Duration.ofMillis(((policy.desiredSleepMinutes + appPersonalization.latencyMinutes) * 60_000.0).roundToLong())
@@ -196,12 +242,53 @@ class UserModelEngine private constructor(
             "live_after_cutoff_context_not_prospective" -> "20시 이후 입력한 생활 맥락을 반영한 실시간 권장이므로 20시 사전 저장 예측으로 간주하지 않습니다."
             else -> "20시 15분 이후 처음 계산한 재구성값이므로 사전 저장 예측으로 간주하지 않습니다."
         }
+        val tabDptRuntime = when (val runtime = tabDptResult) {
+            is TabDptResult.Success -> JSONObject()
+                .put("status", when {
+                    policy.dataPreferenceApplied -> "available_applied"
+                    tabDptPreferredBed != null -> "available_infeasible_not_applied"
+                    else -> "available_night_mismatch_not_applied"
+                })
+                .put("model_version", runtime.prediction.modelVersion)
+                .put("feature_contract", TABDPT_FEATURE_CONTRACT)
+                .put("source", runtime.prediction.backend.wireName)
+                .put("display_name", runtime.prediction.backend.displayName)
+                .put("prediction_key", runtime.prediction.backend.predictionKey)
+                .put("network_required", runtime.prediction.backend == PredictionBackend.SERVER_TABDPT)
+                .put("cohort_combination", "arithmetic_mean_operational_not_validated_benchmark_ensemble")
+                .put("recommendation_night_matches_forecast", tabDptPreferredBed != null)
+                .put("provenance", runtime.prediction.provenance)
+            is TabDptResult.Unavailable -> JSONObject()
+                .put("status", "unavailable_physical_only")
+                .put("reason_code", runtime.code)
+                .put("detail", runtime.detail.take(240))
+                .put("source", runtime.backend.wireName)
+                .put("display_name", runtime.backend.displayName)
+                .put("prediction_key", runtime.backend.predictionKey)
+                .put("network_required", runtime.backend == PredictionBackend.SERVER_TABDPT)
+            null -> if (tabDptProvider == null) {
+                JSONObject().put("status", "disabled_legacy_fusion")
+            } else {
+                JSONObject()
+                    .put("status", "not_requested_historical_reconstruction")
+                    .put("reason_code", if (predictionBackend == PredictionBackend.SERVER_TABDPT)
+                        "historical_network_suppressed" else "historical_prediction_suppressed")
+                    .put("source", predictionBackend.wireName)
+                    .put("display_name", predictionBackend.displayName)
+                    .put("prediction_key", predictionBackend.predictionKey)
+                    .put("network_required", predictionBackend == PredictionBackend.SERVER_TABDPT)
+            }
+        }
         val forecast = Forecast(
             generatedAt = generated,
-            cmiBedOffset = cmiBed,
-            mesaBedOffset = mesaBed,
-            ensembleBedOffset = behaviorBed,
-            note = "$notePrefix CMI·MESA 평균은 검증된 새 앙상블이 아니라 행동 지연 안내용 참고값입니다."
+            cmiBedOffset = if (tabDptProvider == null || tabDptPrediction != null) cmiBed else null,
+            mesaBedOffset = if (tabDptProvider == null || tabDptPrediction != null) mesaBed else null,
+            ensembleBedOffset = if (tabDptProvider == null || tabDptPrediction != null) behaviorBed else null,
+            note = when {
+                tabDptPrediction != null -> "$notePrefix ${tabDptPrediction.backend.displayName} CMI·MESA 산술평균은 운영상 선호 시각이며 검증된 성능 앙상블 점수가 아닙니다."
+                tabDptProvider != null -> "$notePrefix ${predictionBackend.displayName} 예측을 사용할 수 없어 예상 시각은 표시하지 않고, 개인화 Two-Process만으로 권장합니다."
+                else -> "$notePrefix CMI·MESA 평균은 검증된 새 앙상블이 아니라 행동 지연 안내용 참고값입니다."
+            }
         )
         val recommendation = Recommendation(
             generatedAt = generated,
@@ -228,6 +315,8 @@ class UserModelEngine private constructor(
                 if (activeContext?.caffeineAt != null) append("카페인 기록은 생활 맥락으로 함께 저장했습니다. ")
                 if (policy.extensionMinutes > 0) append("측정 정보가 갖춰진 최근 수면 기록의 관측 부족분을 반영해 수면 기회를 ${policy.extensionMinutes.roundToInt()}분 늘렸습니다. ")
                 if (policy.napApplied) append("완료된 낮잠을 고정 Two-Process 수면압력 계산에 반영했습니다. ")
+                if (policy.dataPreferenceApplied) append("${tabDptPrediction?.backend?.displayName ?: predictionBackend.displayName} 예측은 목표 수면시간과 기상 제약을 지키는 후보 안에서만 선호도로 반영했습니다. ")
+                else if (tabDptProvider != null) append("${predictionBackend.displayName} 예측은 사용할 수 없거나 제약을 만족하지 않거나 권장 밤과 예측 밤이 달라 이번 일정에는 반영하지 않았습니다. ")
                 append("확보 가능한 범위에서 고정 Two-Process 수면압력·일주기 점수로 5분 간격 후보를 비교했고 ${formatTime(windDown)}부터 준비하도록 안내합니다. ")
                 append(if (inputPolicy == SleepInputPolicy.DIARY_AND_WEARABLE_V1)
                     "착용 수면 시각은 서비스 예측·행동 위상 입력이며, S는 측정값이 아닌 Two-Process 계산값입니다."
@@ -245,9 +334,28 @@ class UserModelEngine private constructor(
                 liveInputRows.count { isManualEntry(it.record) }, forecastInputRows.size, liveInputRows.size,
                 inputPolicy, localNow, result, appPersonalization, policy, forecastStatus, windDown,
                 activeContext, scheduleWake, constrainedWake, desiredBedtime, availableMinutes, planFeasible,
-                adaptivePredictions, researchBaselines)
+                adaptivePredictions, researchBaselines, tabDptRuntime, predictionBackend)
         )
     }
+
+    private fun addMinutes(base: ZonedDateTime, minutes: Double): ZonedDateTime =
+        base.plusNanos((minutes * 60_000_000_000.0).roundToLong())
+
+    private fun tabDptPredictionJson(
+        cutoff: ZonedDateTime,
+        onset: Double,
+        wake: Double,
+        latencyMinutes: Double,
+        backend: PredictionBackend
+    ): JSONObject = JSONObject()
+        .put("bed", addMinutes(cutoff, onset - latencyMinutes).toOffsetDateTime().toString())
+        .put("onset", addMinutes(cutoff, onset).toOffsetDateTime().toString())
+        .put("wake", addMinutes(cutoff, wake).toOffsetDateTime().toString())
+        .put("bed_offset_min", onset - latencyMinutes)
+        .put("onset_offset_min", onset)
+        .put("wake_offset_min", wake)
+        .put("latency_allowance_min", latencyMinutes)
+        .put("source", backend.wireName)
 
     private data class WeektypePattern(
         val status: String,
@@ -467,9 +575,18 @@ class UserModelEngine private constructor(
         availableMinutes: Int,
         planFeasible: Boolean,
         adaptivePredictions: JSONObject,
-        researchBaselines: ResearchBaselines.Snapshot
+        researchBaselines: ResearchBaselines.Snapshot,
+        tabDptRuntime: JSONObject,
+        predictionBackend: PredictionBackend
     ): JSONObject {
         val valid = personalRows(records.filter { isManualEntry(it) || isWearableEntry(it) }, now, profile.createdAt)
+        val preciseOpportunityMinutes = Duration.between(
+            recommendationPolicy.bed,
+            recommendationPolicy.wake
+        ).toNanos() / 60_000_000_000.0
+        val preciseShortfallMinutes = (
+            recommendationPolicy.desiredSleepMinutes + personalization.latencyMinutes - preciseOpportunityMinutes
+        ).coerceAtLeast(0.0).let { if (it <= 1.0 / 60_000.0) 0.0 else it }
         val primaryRows = valid.filter { isManualEntry(it.record) }
         val wearableRows = valid.filter { !isManualEntry(it.record) }
         val recent = primaryRows.takeLast(14)
@@ -510,7 +627,7 @@ class UserModelEngine private constructor(
                 .put("personalized_sleep_target_min", personalization.durationMinutes)
                 .put("latency_allowance_min", personalization.latencyMinutes)
                 .put("available_opportunity_min", availableMinutes)
-                .put("shortfall_min", (recommendationPolicy.desiredSleepMinutes + personalization.latencyMinutes - availableMinutes).coerceAtLeast(0.0))
+                .put("shortfall_min", preciseShortfallMinutes)
                 .put("constrained_wake", constrainedWake.toOffsetDateTime().toString())
                 .put("desired_bedtime", desiredBedtime.toOffsetDateTime().toString()))
             .put("measurement_recommendation", JSONObject()
@@ -523,6 +640,15 @@ class UserModelEngine private constructor(
                 .put("extension_min", recommendationPolicy.extensionMinutes)
                 .put("current_s", recommendationPolicy.currentS)
                 .put("completed_nap_applied", recommendationPolicy.napApplied)
+                .put("prediction_preference_applied", recommendationPolicy.dataPreferenceApplied)
+                .put("prediction_preferred_bed", recommendationPolicy.dataPreferredBed?.toOffsetDateTime()?.toString() ?: JSONObject.NULL)
+                .put("prediction_preference_rule", "bounded_within_feasible_two_process_candidates_not_validated_efficacy")
+                .put("tabdpt_hybrid_preference_applied", predictionBackend != PredictionBackend.LOCAL_HGB && recommendationPolicy.dataPreferenceApplied)
+                .put("tabdpt_hybrid_preferred_bed", if (predictionBackend != PredictionBackend.LOCAL_HGB)
+                    recommendationPolicy.dataPreferredBed?.toOffsetDateTime()?.toString() ?: JSONObject.NULL else JSONObject.NULL)
+                .put("tabdpt_preferred_bed", if (predictionBackend != PredictionBackend.LOCAL_HGB)
+                    recommendationPolicy.dataPreferredBed?.toOffsetDateTime()?.toString() ?: JSONObject.NULL else JSONObject.NULL)
+                .put("tabdpt_preference_rule", "bounded_within_feasible_two_process_candidates_not_validated_efficacy")
                 .put("occupied_schedule_support", "not_available_android_input")
                 .put("weekend_specific_wake_support", "not_available_android_input"))
             .put("physical_provider", PortableFusionModel.PHYSICAL_PROVIDER)
@@ -548,6 +674,8 @@ class UserModelEngine private constructor(
                 .put("observation_boundary_role", if (result.observationBoundaryInclusive)
                     "live_service_known_by_actual_now" else "strict_research_cutoff"))
             .put("model_feature_contract", PortableFusionModel.FEATURE_CONTRACT)
+            .put("prediction_runtime", tabDptRuntime)
+            .put("tabdpt_runtime", if (predictionBackend != PredictionBackend.LOCAL_HGB) tabDptRuntime else JSONObject.NULL)
             .put("profile_contract", JSONObject()
                 .put("usual_wake", profile.usualWake).put("usual_bed", profile.usualBed)
                 .put("desired_sleep_minutes", UserContractRules.boundAdultSleepTarget(profile.desiredSleepMinutes))

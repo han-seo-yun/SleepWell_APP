@@ -53,6 +53,13 @@ fun MyInformationScreen() {
         Text("이 정보는 기기에 저장됩니다. 희망 수면시간과 평소 시각은 개인화 초기값으로 사용하고, 성별·활동량은 프로필 정보로 보존합니다.",
             style = MaterialTheme.typography.bodyMedium)
         HorizontalDivider()
+        Text("기기 내 경량 TabDPT 예측", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "수면 기록 특징 33개와 수리 특성 6개를 경량 TabDPT로 계산하고, 기존 개인화와 기상 목표를 반영합니다. PC 서버 연결은 필요하지 않습니다. 첫 계산은 수 분 걸릴 수 있어요.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text("연구 원본과 구분되는 모바일 설정: 문맥 1,024개 · 앙상블 2회. 계산 중에도 기록을 확인할 수 있습니다.", style = MaterialTheme.typography.bodySmall)
+        HorizontalDivider()
         Text("시간대 자동 · ${UiZone.current.zoneId}", style = MaterialTheme.typography.bodyMedium)
         Text("시각은 현재 기기의 시간대에 맞춰 표시합니다.", style = MaterialTheme.typography.bodySmall)
         Text("SleepWell $versionName", style = MaterialTheme.typography.labelMedium,

@@ -1,5 +1,19 @@
 # 통합 v8 검증 안내
 
+## 0.8.7 경량 TabDPT 검증 — 2026-11-08
+
+공개 저장소에는 TabDPT 가중치·CMI/MESA 학습 문맥·golden 입력을 포함하지 않습니다. `tools/setup_light_tabdpt.ps1`로 검증된 비공개 번들의 9개 파일을 해시 확인 후 준비한 환경에서 검증했습니다.
+
+- 기존 기능 회귀 226개 통과
+- 기기 시간대·DST·계산 중 UI 비차단 6개 통과
+- 실제 ONNX golden 및 28일 DATA33→TabDPT→개인화 통합 2개 통과
+- 앱·androidTest APK 빌드 및 lint 성공, lint 오류 0개
+- 모델 검사 중 에뮬레이터 활성 네트워크 없음
+
+생산 패키지는 `app.sleepwell.offlinehgb`, 테스트 패키지는 `app.sleepwell.offlinehgb.test`입니다. applicationId의 `offlinehgb`는 기존 설치 데이터와 업데이트 호환성을 위한 영구 식별자이며 0.8.7의 생산 예측기는 경량 TabDPT입니다.
+
+실물 Samsung Health/Watch 신규 기록 수신과 장시간 백그라운드 실행은 이 에뮬레이터 검사 범위가 아닙니다. A52s 독립 모델 검사에서 관측된 지연도 완성된 앱의 성능 보증으로 사용하지 않습니다. 아래 2026-11-06 내용은 이전 0.8.4 검증 기록입니다.
+
 검증일: 2026-11-06. 연령대 입력 제거 후 Android API 37 에뮬레이터에서 36개 회귀 테스트 클래스의 **208개 테스트가 통과**했습니다 (38.639초). 수동 실행 전용 `BackgroundJobLifecycleProbe`는 이 집계에서 제외했습니다. 별도 JVM 테스트 소스는 없으므로 `testDebugUnitTest`는 `NO-SOURCE`입니다.
 
 ## 빌드
@@ -22,7 +36,7 @@ $classes = Get-ChildItem app/src/androidTest/java -Recurse -Filter '*Test.kt' | 
     $packageName = $packageLine.Substring(8).Trim()
     "$packageName.$($_.BaseName)"
 }
-adb shell am instrument -w -r -e class ($classes -join ',') app.sleepwell.test/android.test.InstrumentationTestRunner
+adb shell am instrument -w -r -e class ($classes -join ',') app.sleepwell.offlinehgb.test/android.test.InstrumentationTestRunner
 ```
 
 이 명령은 현재 테스트 파일명과 클래스명이 같은 구조를 이용합니다. 수동 작업 상태를 검사하는 `BackgroundJobLifecycleProbe`는 선택되지 않습니다.
