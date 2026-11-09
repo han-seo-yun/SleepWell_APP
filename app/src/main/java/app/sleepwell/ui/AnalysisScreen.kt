@@ -1269,10 +1269,10 @@ private fun DirectInputCard(
 
             // ── 목표 기상 ──
             Spacer(Modifier.height(10.dp))
-            FieldTitle("목표 기상 시각", if (recommendationReady) StatusTag.USED else StatusTag.PREPARING)
+            FieldTitle("이 시각까지 기상 · 선택", if (recommendationReady) StatusTag.USED else StatusTag.PREPARING)
             OutlinedTextField(
                 value = form.targetWakeText, onValueChange = { onChange(form.copy(targetWakeText = it)) },
-                label = { Text("목표 기상") }, placeholder = { Text("07:30") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                label = { Text("기상 제한 시각") }, placeholder = { Text("07:30") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 trailingIcon = {
                     IconButton(modifier = Modifier.semantics { contentDescription = "목표 기상 시각 선택" }, onClick = { pickTime(context, form.targetWakeText, 7, 0) { onChange(form.copy(targetWakeText = it)) } }) { Text("🕒") }
                 }

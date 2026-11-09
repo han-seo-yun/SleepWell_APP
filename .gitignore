@@ -35,7 +35,7 @@ keystore.properties
 *.db-*
 *.sqlite*
 *.csv
-!app/src/main/assets/demo_*.csv
+
 
 # Internal historical root reports; public documentation is in README and docs
 /*.md
@@ -47,3 +47,7 @@ Thumbs.db
 
 # Private legacy regression assets (optional local test setup)
 /app/src/androidTest/assets/fixtures/mobile_hgb_*_golden.json
+
+# Local demonstration fixtures must not be published
+/app/src/androidTest/assets/joint_demo28/
+/app/src/androidTest/assets/demo_*

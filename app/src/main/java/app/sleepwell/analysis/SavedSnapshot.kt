@@ -309,6 +309,7 @@ object SavedSnapshot {
 
     private fun resultToJson(result: AnalysisResult) = JSONObject()
         .put("schema", SCHEMA)
+        .put("surveyFeatureSnapshot", result.surveyFeatureSnapshot?.let(::JSONObject) ?: JSONObject.NULL)
         .put("currentS", result.currentS)
         .put("currentC", result.currentC)
         .put("currentPropensity", result.currentPropensity)
@@ -327,6 +328,7 @@ object SavedSnapshot {
         .put("predictionLimitations", JSONArray(result.predictionLimitations))
 
     private fun resultFromJson(j: JSONObject) = AnalysisResult(
+        surveyFeatureSnapshot = j.optJSONObject("surveyFeatureSnapshot")?.toString(),
         currentS = j.getDouble("currentS"), currentC = j.getDouble("currentC"),
         currentPropensity = j.getDouble("currentPropensity"),
         sleepRecords = j.getJSONArray("sleepRecords").objects(::sleepRecordFromJson),

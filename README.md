@@ -4,15 +4,15 @@ Android 수면 기록·개인화 수면 계획 앱 **SleepWell**입니다. Samsu
 
 **저자: [Han Seoyun (han-seo-yun)](https://github.com/han-seo-yun)**
 
-패키지 `app.sleepwell.offlinehgb` · 버전 **0.8.8** (16) · 변경일 `2026-11-08`
+패키지 `app.sleepwell.offlinehgb` · 버전 **0.8.9** (17) · 변경일 `2026-11-08`
 
 ## 설치용 APK
 
-**[SleepWell v0.8.8 APK 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.8/SleepWell-v0.8.8-debug.apk)**
+**[SleepWell v0.8.9 APK 다운로드](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.9/SleepWell-v0.8.9-debug.apk)**
 
 Android 10(API 29) 이상용 디버그 서명 APK입니다.
 
-[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.8) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.8/SHA256SUMS.txt)
+[릴리스 상세](https://github.com/han-seo-yun/SleepWell_APP/releases/tag/v0.8.9) · [SHA-256 확인 파일](https://github.com/han-seo-yun/SleepWell_APP/releases/download/v0.8.9/SHA256SUMS.txt)
 
 ## SleepWell Update
 

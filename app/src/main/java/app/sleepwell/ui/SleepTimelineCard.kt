@@ -118,16 +118,6 @@ fun LatestSleepCard(
                     Text("연결·데이터 상태 확인")
                 }
             } else {
-                val isPastSelection = index > 0
-                val isStale = nowMs - night.wakeMs > 3L * 24 * 60 * 60 * 1_000
-                if (isPastSelection || isStale) {
-                    Text(
-                        listOfNotNull(if (isPastSelection) "과거 기록" else null, if (isStale) "3일 이상 지난 기록" else null)
-                            .joinToString(" · "),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
-                }
                 if (night.stageSegments.isEmpty()) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Metric("침대에 있던 구간", durationText(night.intervalMinutes), Modifier.weight(1f))

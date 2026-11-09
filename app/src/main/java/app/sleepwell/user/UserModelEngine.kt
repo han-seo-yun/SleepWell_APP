@@ -87,7 +87,8 @@ class UserModelEngine private constructor(
         prospectiveForecasts: List<JSONObject> = emptyList(),
         prospectiveOutcomes: List<JSONObject> = emptyList(),
         historicalEvaluation: Boolean = false,
-        inputPolicy: SleepInputPolicy = SleepInputPolicy.DIARY_ONLY
+        inputPolicy: SleepInputPolicy = SleepInputPolicy.DIARY_ONLY,
+        recommendBoth: Boolean = false
     ): EngineOutput {
         val localNow = now.atZone(calculationZone)
         val decisionToday = localNow.toLocalDate().atTime(20, 0).atZone(calculationZone)
@@ -170,7 +171,7 @@ class UserModelEngine private constructor(
         val wakeDate = recommendationNightId.plusDays(1)
         val habitualWake = ZonedDateTime.of(wakeDate, appPersonalization.wakeTime, calculationZone)
         val scheduleWake = activeContext?.resolveScheduleWake(recommendationCutoff, localNow)
-            ?.takeIf { it.isBefore(habitualWake) }
+            ?.takeIf { recommendBoth || it.isBefore(habitualWake) }
         val constrainedWake = scheduleWake ?: habitualWake
         val targetDuration = appPersonalization.durationMinutes
         val completeDiaries = liveInputRows.mapNotNull { row ->
@@ -208,9 +209,11 @@ class UserModelEngine private constructor(
             usualWake = usualWake,
             recentCompleteDiaries = completeDiaries,
             completedNap = completedNap,
-            dataPreferredBed = tabDptPreferredBed
+            dataPreferredBed = tabDptPreferredBed,
+            recommendBoth = recommendBoth && !historicalEvaluation,
+            latestWake = scheduleWake
         )
-        val desiredBedtime = constrainedWake.minus(
+        val desiredBedtime = policy.wake.minus(
             Duration.ofMillis(((policy.desiredSleepMinutes + appPersonalization.latencyMinutes) * 60_000.0).roundToLong())
         )
         val wake = policy.wake
@@ -303,14 +306,14 @@ class UserModelEngine private constructor(
                 if (!planFeasible) {
                     append("현재 일정으로 목표 수면시간과 입면 여유를 모두 확보하기 어려워 일정 조정이 필요합니다. 확보 가능한 수면 기회는 ${availableMinutes}분입니다. ")
                 } else {
-                    append("기상 목표, ${targetDuration}분 수면 목표와 입면 여유 ${appPersonalization.latencyMinutes.roundToInt()}분을 우선한 권장입니다. ")
+                    append(if (policy.jointRecommendation) "개인 수면 리듬과 ${targetDuration}분 수면 목표, 입면 여유 ${appPersonalization.latencyMinutes.roundToInt()}분을 반영해 취침·기상을 함께 권장합니다. " else "기상 목표, ${targetDuration}분 수면 목표와 입면 여유 ${appPersonalization.latencyMinutes.roundToInt()}분을 우선한 권장입니다. ")
                 }
                 append(when {
                     !appPersonalization.personalized -> "아직 유효한 수면 기록이 없어 사용자가 정한 목표 수면시간과 평소 일정을 유지합니다. "
                     appPersonalization.conservative -> "최근성 가중 수면 기록 통계는 갱신했지만 근거가 부족·오래됨·불규칙한 경우라 사용자가 정한 수면 목표를 보수적으로 유지합니다. "
                     else -> "14일 반감기 수면 기록 근거와 사용자 목표를 수축 결합해 개인화했습니다. "
                 })
-                if (scheduleWake != null && constrainedWake == scheduleWake) append("다음 일정과 준비 시간을 반영해 기상 시각을 앞당겼습니다. ")
+                if (scheduleWake != null) append("입력한 일정 이전에 기상하도록 제한했습니다. ")
                 if (activeContext?.napStart != null) append("낮잠 기록은 생활 맥락으로 함께 저장했습니다. ")
                 if (activeContext?.caffeineAt != null) append("카페인 기록은 생활 맥락으로 함께 저장했습니다. ")
                 if (policy.extensionMinutes > 0) append("측정 정보가 갖춰진 최근 수면 기록의 관측 부족분을 반영해 수면 기회를 ${policy.extensionMinutes.roundToInt()}분 늘렸습니다. ")
@@ -620,7 +623,8 @@ class UserModelEngine private constructor(
             .put("forecast_status", forecastStatus)
             .put("cutoff", result.cutoff.toOffsetDateTime().toString())
             .put("recommendation_engine_version", RECOMMENDATION_ENGINE_VERSION)
-            .put("recommendation_policy", RECOMMENDATION_POLICY_VERSION)
+            .put("recommendation_policy", if (recommendationPolicy.jointRecommendation) "joint_sleep_window_v2" else RECOMMENDATION_POLICY_VERSION)
+            .put("joint_recommendation", recommendationPolicy.jointRecommendation)
             .put("recommendation_feasibility", JSONObject()
                 .put("plan_feasible", planFeasible)
                 .put("target_duration_min", recommendationPolicy.desiredSleepMinutes)
@@ -628,7 +632,8 @@ class UserModelEngine private constructor(
                 .put("latency_allowance_min", personalization.latencyMinutes)
                 .put("available_opportunity_min", availableMinutes)
                 .put("shortfall_min", preciseShortfallMinutes)
-                .put("constrained_wake", constrainedWake.toOffsetDateTime().toString())
+                .put("constrained_wake", if (recommendationPolicy.jointRecommendation) scheduleWake?.toOffsetDateTime()?.toString() ?: JSONObject.NULL else constrainedWake.toOffsetDateTime().toString())
+                .put("recommended_wake", recommendationPolicy.wake.toOffsetDateTime().toString())
                 .put("desired_bedtime", desiredBedtime.toOffsetDateTime().toString()))
             .put("measurement_recommendation", JSONObject()
                 .put("supported_subset", "complete_diary_debt_latency_fixed_two_process_candidate_search_completed_nap")

@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextAlign
+import kotlin.math.roundToInt
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.sleepwell.analysis.NextNightModel
@@ -45,6 +52,7 @@ fun ProfileEditor(
     val base = initialProfile ?: NextNightModel.ModelProfile()
     var sex by rememberSaveable { mutableStateOf(initialProfile?.sex.orEmpty()) }
     var activity by rememberSaveable { mutableStateOf(base.activityMinutes) }
+    var activityPosition by rememberSaveable { mutableStateOf(base.activityMinutes.toFloat()) }
     var desiredHours by rememberSaveable { mutableStateOf((base.desiredSleepMinutes / 60).toString()) }
     var desiredMinutes by rememberSaveable { mutableStateOf((base.desiredSleepMinutes % 60).toString()) }
     var bed by rememberSaveable { mutableStateOf(base.usualBed) }
@@ -56,20 +64,20 @@ fun ProfileEditor(
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(if (firstRun) "맞춤 수면 분석 시작하기" else "내 정보 수정",
-            style = MaterialTheme.typography.headlineSmall)
-        Text(if (firstRun) "기본정보와 수면 습관을 두 단계로 저장하면 삼성 헬스 기록을 바탕으로 분석을 시작합니다." else
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = if (firstRun) FontWeight.Bold else null)
+        Text(if (firstRun) "기본 프로필과 수면 습관을 저장하면,\n삼성 헬스 기록과 연동된 모델로 분석을 시작합니다." else
             "저장하면 변경한 정보로 수면 분석을 다시 계산합니다.", style = MaterialTheme.typography.bodyMedium)
-        Text("정보는 이 기기에 저장되며, 나중에 수정할 수 있어요.", style = MaterialTheme.typography.bodySmall)
 
         if (firstRun) {
-            Text("${onboardingStep + 1}/2 · ${if (onboardingStep == 0) "기본정보" else "수면 습관"}",
+            Text("${onboardingStep + 1}/2 · ${if (onboardingStep == 0) "기본 프로필" else "수면 습관"}",
                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             LinearProgressIndicator(progress = { (onboardingStep + 1) / 2f }, modifier = Modifier.fillMaxWidth())
         }
 
         if (!firstRun || onboardingStep == 0) Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("기본정보", style = MaterialTheme.typography.titleMedium)
+                Text("기본 프로필", style = MaterialTheme.typography.titleMedium)
                 Text("성별", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ProfileStore.SEXES.forEach { (value, label) ->
@@ -108,18 +116,37 @@ fun ProfileEditor(
                 Text("24시간 형식으로 입력해 주세요. 예: 23:30, 07:30", style = MaterialTheme.typography.bodySmall)
                 Text("하루 활동량", style = MaterialTheme.typography.labelLarge)
                 Text("걷기·운동 등 몸을 움직이는 시간", style = MaterialTheme.typography.bodySmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ProfileStore.ACTIVITY.forEach { (minutes, label) ->
-                        FilterChip(selected = ProfileStore.activityLabel(activity) == label,
-                            onClick = { activity = minutes }, label = { Text(label) })
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActivityMotionIcon(activityPosition / 120f)
+                    Slider(
+                        value = activityPosition,
+                        onValueChange = { position ->
+                            activityPosition = position
+                            activity = position.roundToInt()
+                        },
+                        valueRange = 0f..maxOf(120f, base.activityMinutes.toFloat()),
+                        steps = 0,
+                        modifier = Modifier.weight(1f).semantics {
+                            contentDescription = "하루 활동량"
+                            stateDescription = "${activity}분"
+                        }
+                    )
+                }
+                Text("하루 ${activity}분", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    listOf("적음", "보통", "많음").forEach { label ->
+                        Text(label, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
-        Text(if (firstRun && onboardingStep == 0)
-            "성별은 프로필 정보로 기기에 저장됩니다."
-            else "희망 수면시간과 평소 시각은 개인화 초기값으로 사용합니다. 활동량은 생활 정보로 저장됩니다.",
-            style = MaterialTheme.typography.bodySmall)
+        if (!firstRun || onboardingStep == 1) {
+            Text("희망 수면시간과 평소 시각은 개인화 초기값으로 사용합니다. 활동량은 생활 정보로 저장됩니다.",
+                style = MaterialTheme.typography.bodySmall)
+        }
         if ((!firstRun || onboardingStep == 0) && !hasBasics)
             Text("성별을 선택해 주세요.", style = MaterialTheme.typography.bodySmall)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
@@ -144,7 +171,7 @@ fun ProfileEditor(
         }
         if (firstRun && onboardingStep == 1) {
             TextButton(onClick = { error = null; onboardingStep = 0 }, modifier = Modifier.fillMaxWidth()) {
-                Text("이전 · 기본정보")
+                Text("이전 · 기본 프로필")
             }
         }
         onCancel?.let { cancel ->

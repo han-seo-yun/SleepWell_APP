@@ -53,9 +53,9 @@ fun MyInformationScreen() {
         Text("이 정보는 기기에 저장됩니다. 희망 수면시간과 평소 시각은 개인화 초기값으로 사용하고, 성별·활동량은 프로필 정보로 보존합니다.",
             style = MaterialTheme.typography.bodyMedium)
         HorizontalDivider()
-        Text("기기 내 HGB 하이브리드 예측", style = MaterialTheme.typography.titleMedium)
+        Text("하이브리드 모델 연동 예측", style = MaterialTheme.typography.titleMedium)
         Text(
-            "수면 기록 특징 33개와 수리 특성 6개를 HGB 하이브리드로 계산하고, 기존 개인화와 기상 목표를 반영합니다. PC 서버 연결은 필요하지 않습니다.",
+            "수면 기록 특징 33개와 수리 특성 6개를 HGB 하이브리드로 계산하고, 기존 개인화와 기상 목표를 반영합니다.",
             style = MaterialTheme.typography.bodyMedium
         )
         Text("예측 모델: HGB 하이브리드 · 기기 내 오프라인 계산. 계산 중에도 기록을 확인할 수 있습니다.", style = MaterialTheme.typography.bodySmall)

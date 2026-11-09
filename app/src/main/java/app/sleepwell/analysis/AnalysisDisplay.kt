@@ -700,7 +700,7 @@ object AnalysisPresenter {
         if (d?.sleepStartMs != null && d.sleepEndMs != null)
             out += "✓ 최근 수면 ${dayTime(d.sleepStartMs)} → ${hhmm(d.sleepEndMs)} : 계산에 반영됨 (업로드 기록과 겹치는 부분은 기록 우선)"
         d?.targetWakeMs?.let {
-            out += if (hasRecommendation) "목표 기상 ${dayTime(it)} : 평소보다 이른 목표일 때 권장에 적용합니다."
+            out += if (hasRecommendation) "목표 기상 ${dayTime(it)} : 이 시각 이전에 기상하도록 권장을 제한합니다."
                    else "목표 기상 ${dayTime(it)} : 이번 권장을 계산하지 못해 반영 여부를 확인할 수 없어요."
         }
         d?.plannedBedMs?.let { out += "예정 취침 ${dayTime(it)} : 계산에 반영 안 됨 (저장만)" }
@@ -845,7 +845,7 @@ object AnalysisPresenter {
                 else "목표 기상이 없어 예상 기상은 예상 취침에 평소 수면시간을 더해 계산했고, 권장 취침은 계산하지 않았어요.")
         if (LimitCode.NO_SURVEY_FEATURES in codes)
             add(if (past) "이 날은 설문(카페인·낮잠·운동·피로도) 기록이 없어요."
-                else "아직 설문 응답이 없어요. 수면 기록에 연결한 개운함·피로도는 측정 정보가 충분할 때 개인화 근거로 사용합니다.")
+                else "오늘 분석에 사용할 설문 응답이 없어요. 수면 기록에 연결한 개운함·피로도는 측정 정보가 충분할 때 개인화 근거로 사용합니다.")
     }
 
     /** 계산을 못 한 이유 → 안내 카드 */

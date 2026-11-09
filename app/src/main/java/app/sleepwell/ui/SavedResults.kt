@@ -110,7 +110,7 @@ fun SavedResultsScreen() {
     val selectedDate = selectedDateText?.let { text -> runCatching { LocalDate.parse(text) }.getOrNull() }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-        Text("수면 기록", style = MaterialTheme.typography.headlineSmall)
+        Text("수면 기록", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text("현재 기기 시간대 · ${zone.id} · 기상일 기준", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(14.dp))

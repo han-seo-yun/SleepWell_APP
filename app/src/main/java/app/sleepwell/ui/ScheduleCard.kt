@@ -102,7 +102,7 @@ private fun RecommendationFirst(s: Schedule, background: Color, line: Color, tex
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = onAskTargetWake, modifier = Modifier.fillMaxWidth()) {
-                    Text("목표 기상 시각 수정")
+                    Text("기상 제한 시각 설정 · 선택")
                 }
             }
             s.needsTargetWake -> {
@@ -213,9 +213,9 @@ private fun RecommendationTimes(rec: ScheduleRecommendation, color: Color) {
     }
     if (LocalDensity.current.fontScale > 1.3f) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         value("권장 취침", rec.bedMs, rec.bedText)
-        value("목표 기상", rec.targetWakeMs, rec.targetWakeText)
+        value("권장 기상", rec.targetWakeMs, rec.targetWakeText)
     } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         value("권장 취침", rec.bedMs, rec.bedText, Modifier.weight(1f))
-        value("목표 기상", rec.targetWakeMs, rec.targetWakeText, Modifier.weight(1f))
+        value("권장 기상", rec.targetWakeMs, rec.targetWakeText, Modifier.weight(1f))
     }
 }

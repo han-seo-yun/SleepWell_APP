@@ -75,7 +75,10 @@ data class AnalysisResult(
     val personalizationStage: String = PersonalizationStage.INITIAL,
 
     /** 결과는 나왔지만 예측·권장이 제한되는 이유 코드 목록 (LimitCode). 비어 있으면 제한 없음. */
-    val predictionLimitations: List<String> = emptyList()
+    val predictionLimitations: List<String> = emptyList(),
+
+    /** Immutable survey input captured at prediction time; null for older results. */
+    val surveyFeatureSnapshot: String? = null
 )
 
 // ────────────────────────────────────────────────

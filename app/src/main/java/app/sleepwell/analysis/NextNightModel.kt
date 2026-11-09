@@ -192,7 +192,8 @@ object NextNightModel {
             val up = userProfile(engineNights, availableAt).copy(dailyContext = dailyContext(direct, features, contextObservedAt))
             val out = eng.compute(
                 up, engineNights, decisionTime.toInstant(), historicalEvaluation = historicalReconstruction,
-                inputPolicy = if (includeImportedRecords) SleepInputPolicy.DIARY_AND_WEARABLE_V1 else SleepInputPolicy.DIARY_ONLY
+                inputPolicy = if (includeImportedRecords) SleepInputPolicy.DIARY_AND_WEARABLE_V1 else SleepInputPolicy.DIARY_ONLY,
+                recommendBoth = !historicalReconstruction
             )
             lastError = null
             val p = out.outcomes.getJSONObject("research_predictions")
@@ -268,6 +269,12 @@ object NextNightModel {
             )
             result.copy(
                 recommendation = rec,
+                surveyFeatureSnapshot = SurveyModelFeatures.snapshot(
+                    surveyDays.map(SurveyModelFeatures::input), if (demoMode) "Test" else "me",
+                    cutoff.toLocalDate().toString(), historyBoundary.toEpochMilli(),
+                    decisionTime.toInstant().toEpochMilli(), !historicalReconstruction, demoMode,
+                    out.outcomes.optJSONObject("research_feature_snapshot")
+                ),
                 modelVersion = "분석: Two-Process · 예측: ${when {
                     tabDptAvailable -> tabDptRuntime?.optString("model_version")
                     tabDptEnabled && tabDptStatus == "not_requested_historical_reconstruction" ->

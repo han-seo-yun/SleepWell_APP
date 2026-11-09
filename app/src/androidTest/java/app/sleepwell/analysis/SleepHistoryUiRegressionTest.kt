@@ -199,6 +199,42 @@ class SleepHistoryUiRegressionTest : InstrumentationTestCase() {
         assertEquals(420, points.single().durationMinutes) // real elapsed duration remains seven hours
     }
 
+    fun testClockAxisLabelsUseWakeDateAndSeparateMidnightWrap() {
+        assertEquals("전날 23:00", SleepChartData.clockAxisLabel(660))
+        assertEquals("당일 00:00", SleepChartData.clockAxisLabel(720))
+        assertEquals("당일 09:00", SleepChartData.clockAxisLabel(1260))
+        assertTrue(SleepChartData.connectsClockValues(660, 750))
+        assertFalse(SleepChartData.connectsClockValues(2100, 720))
+        assertFalse(SleepChartData.connectsClockValues(720, 2100))
+    }
+
+    fun testDemoMidnightUtcWakeProjectsToNineAmInSeoul() {
+        val night = historyNight("2026-10-31", "2026-10-30T12:50:00Z", "2026-10-31T00:00:00Z")
+        val point = SleepChartData.trend(listOf(night), ZoneId.of("Asia/Seoul"), now.toEpochMilli(), 30).single()
+        assertEquals(LocalDate.parse("2026-10-31"), point.day)
+        assertEquals(590, point.bedtimeAxisMinute)
+        assertEquals(1260, point.wakeAxisMinute)
+        assertEquals(670, point.durationMinutes)
+    }
+
+    fun testCustomTrendRangeIncludesEndpointsAndKeepsMissingDaysEmpty() {
+        val nights = listOf(
+            historyNight("2026-10-31", "2026-10-30T14:00:00Z", "2026-10-30T22:00:00Z"),
+            historyNight("2026-11-02", "2026-11-01T14:00:00Z", "2026-11-01T22:00:00Z"),
+            historyNight("2026-11-03", "2026-11-02T14:00:00Z", "2026-11-02T22:00:00Z"))
+        val start = LocalDate.parse("2026-10-31")
+        val end = LocalDate.parse("2026-11-02")
+        val points = SleepChartData.trendBetween(nights, ZoneId.of("Asia/Seoul"), start, end)
+        assertEquals(listOf(start, end), points.map { it.day })
+        assertEquals(1, SleepChartData.trendBetween(nights, ZoneId.of("Asia/Seoul"), end, end).size)
+        assertEquals(0f, SleepChartData.axisFraction(start, end, 3), 0f)
+        assertEquals(1f, SleepChartData.axisFraction(end, end, 3), 0f)
+        try {
+            SleepChartData.trendBetween(nights, ZoneId.of("Asia/Seoul"), end, start)
+            fail("Reversed range must be rejected")
+        } catch (_: IllegalArgumentException) { }
+    }
+
     private fun historyNight(day: String, bed: String, wake: String): SleepHistoryNight {
         val bedMs = Instant.parse(bed).toEpochMilli()
         val wakeMs = Instant.parse(wake).toEpochMilli()

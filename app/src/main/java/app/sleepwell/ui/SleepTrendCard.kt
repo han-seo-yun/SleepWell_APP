@@ -19,6 +19,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.platform.LocalContext
+import java.time.temporal.ChronoUnit
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -66,8 +69,32 @@ fun SleepTrendCard(
     var days by rememberSaveable { mutableIntStateOf(7) }
     var modeName by rememberSaveable { mutableStateOf(TrendMode.DURATION.name) }
     val mode = TrendMode.valueOf(modeName)
-    val points = remember(nights, zone, nowMs, days) { SleepChartData.trend(nights, zone, nowMs, days) }
-    val periodEnd = remember(zone, nowMs) { Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate() }
+    val context = LocalContext.current
+    val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+    var customStart by rememberSaveable { mutableStateOf<String?>(null) }
+    var customEnd by rememberSaveable { mutableStateOf<String?>(null) }
+    val periodEnd = customEnd?.let(LocalDate::parse)?.coerceAtMost(today) ?: today
+    val periodStart = customStart?.let(LocalDate::parse)?.coerceAtMost(periodEnd)
+        ?: periodEnd.minusDays((days - 1).toLong())
+    val periodDays = ChronoUnit.DAYS.between(periodStart, periodEnd).toInt() + 1
+    val points = remember(nights, zone, periodStart, periodEnd) {
+        SleepChartData.trendBetween(nights, zone, periodStart, periodEnd)
+    }
+    fun pickDate(start: Boolean) {
+        val initial = if (start) periodStart else periodEnd
+        android.app.DatePickerDialog(context, { _, year, month, day ->
+            val picked = LocalDate.of(year, month + 1, day)
+            if (start) {
+                customStart = picked.toString()
+                customEnd = maxOf(periodEnd, picked).toString()
+            } else {
+                customEnd = picked.toString()
+                customStart = minOf(periodStart, picked).toString()
+            }
+        }, initial.year, initial.monthValue - 1, initial.dayOfMonth).apply {
+            datePicker.maxDate = today.atTime(23, 59).atZone(zone).toInstant().toEpochMilli()
+        }.show()
+    }
     Card(
         Modifier.fillMaxWidth(), RoundedCornerShape(22.dp),
         CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -75,13 +102,21 @@ fun SleepTrendCard(
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("수면 추세", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { pickDate(true) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                    Text("시작일\n$periodStart")
+                }
+                OutlinedButton(onClick = { pickDate(false) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                    Text("종료일\n$periodEnd")
+                }
+            }
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 listOf(7, 30).forEach { option ->
                     FilterChip(
-                        selected = days == option, onClick = { days = option },
+                        selected = customStart == null && days == option, onClick = { days = option; customStart = null; customEnd = null },
                         label = { Text("${option}일") }, modifier = Modifier.heightIn(min = 48.dp)
                     )
                 }
@@ -101,17 +136,13 @@ fun SleepTrendCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                TrendCanvas(points, days, mode, periodEnd)
+                TrendCanvas(points, periodDays, mode, periodEnd)
                 val average = points.map { it.durationMinutes }.average().toInt()
                 Text(
-                    "${days}일 중 ${points.size}회 기록 · 평균 구간 ${durationText(average)}",
+                    "${periodDays}일 중 ${points.size}회 기록 · 평균 구간 ${durationText(average)}",
                     style = MaterialTheme.typography.bodyMedium
                 )
-                if (mode == TrendMode.CLOCK) Text(
-                    "실선은 취침, 점선은 기상입니다. 기록이 빈 날짜 사이에는 선을 잇지 않습니다.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+
             }
         }
     }
@@ -126,11 +157,11 @@ private fun TrendCanvas(points: List<SleepTrendPoint>, days: Int, mode: TrendMod
     val secondary = MaterialTheme.colorScheme.tertiary
     val maxObservedDuration = (points.maxOfOrNull { it.durationMinutes } ?: 1).coerceAtLeast(1)
     val maxDuration = (ceil(maxObservedDuration / 180.0).toInt() * 180).coerceAtLeast(540)
-    val minAxis = (points.minOfOrNull { minOf(it.bedtimeAxisMinute, it.wakeAxisMinute) } ?: 600) - 30
-    val maxAxis = (points.maxOfOrNull { maxOf(it.bedtimeAxisMinute, it.wakeAxisMinute) } ?: 2100) + 30
+    val minAxis = Math.floorDiv((points.minOfOrNull { minOf(it.bedtimeAxisMinute, it.wakeAxisMinute) } ?: 600) - 30, 180) * 180
+    val maxAxis = (ceil(((points.maxOfOrNull { maxOf(it.bedtimeAxisMinute, it.wakeAxisMinute) } ?: 2100) + 30) / 180.0).toInt()) * 180
     val density = LocalDensity.current
     val leftPaddingPx = with(density) { 68.dp.toPx() }
-    val rightPaddingPx = with(density) { 8.dp.toPx() }
+    val rightPaddingPx = with(density) { if (mode == TrendMode.CLOCK) 30.sp.toPx() + 8.dp.toPx() else 8.dp.toPx() }
     val axisTextSizePx = with(density) { 10.sp.toPx() }
     val axisTextColor = MaterialTheme.colorScheme.onSurfaceVariant
     val periodStart = periodEnd.minusDays((days.coerceAtLeast(1) - 1).toLong())
@@ -168,15 +199,17 @@ private fun TrendCanvas(points: List<SleepTrendPoint>, days: Int, mode: TrendMod
             isAntiAlias = true
             textAlign = android.graphics.Paint.Align.RIGHT
         }
-        repeat(4) { i ->
-            val y = top + plotH * i / 3f
-            drawLine(line, Offset(left, y), Offset(right, y), 1.dp.toPx())
-            val label = if (mode == TrendMode.DURATION) {
-                durationAxisLabel(maxDuration * (3 - i) / 3)
-            } else {
-                val value = minAxis + (maxAxis - minAxis) * (3 - i) / 3
-                clockAxisLabel(value)
-            }
+        val ticks = if (mode == TrendMode.DURATION) (0..3).map { maxDuration * it / 3 }
+            else (minAxis..maxAxis step 180).toList()
+        ticks.forEach { value ->
+            val fraction = if (mode == TrendMode.DURATION) value / maxDuration.toFloat()
+                else (value - minAxis) / (maxAxis - minAxis).coerceAtLeast(1).toFloat()
+            val y = bottom - plotH * fraction
+            val midnight = mode == TrendMode.CLOCK && Math.floorMod(value + 720, 1440) == 0
+            drawLine(if (midnight) axisTextColor else line, Offset(left, y), Offset(right, y),
+                if (midnight) 1.5.dp.toPx() else 1.dp.toPx())
+            val label = if (mode == TrendMode.DURATION) durationAxisLabel(value)
+                else SleepChartData.clockAxisLabel(value)
             drawContext.canvas.nativeCanvas.drawText(label, left - 6.dp.toPx(), y + axisTextSizePx * 0.35f, axisPaint)
         }
         fun x(point: SleepTrendPoint): Float = left + plotW * SleepChartData.axisFraction(point.day, periodEnd, days)
@@ -197,7 +230,8 @@ private fun TrendCanvas(points: List<SleepTrendPoint>, days: Int, mode: TrendMod
                 var previous: SleepTrendPoint? = null
                 points.forEach { point ->
                     val px = x(point); val py = y(value(point))
-                    if (previous == null || java.time.temporal.ChronoUnit.DAYS.between(previous!!.day, point.day) > 1) path.moveTo(px, py)
+                    if (previous == null || java.time.temporal.ChronoUnit.DAYS.between(previous!!.day, point.day) > 1 ||
+                        !SleepChartData.connectsClockValues(value(previous!!), value(point))) path.moveTo(px, py)
                     else path.lineTo(px, py)
                     drawCircle(color, 4.dp.toPx(), Offset(px, py))
                     previous = point
@@ -211,6 +245,25 @@ private fun TrendCanvas(points: List<SleepTrendPoint>, days: Int, mode: TrendMod
             }
             drawSeries({ it.bedtimeAxisMinute }, primary, false)
             drawSeries({ it.wakeAxisMinute }, secondary, true)
+            // Direct labels tie the series names to the last real values, not to empty dates.
+            val last = points.last()
+            val labelPaint = android.graphics.Paint(axisPaint).apply {
+                textAlign = android.graphics.Paint.Align.LEFT
+                textSize = 12.sp.toPx()
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            val sleepY = y(last.bedtimeAxisMinute)
+            val wakeY = y(last.wakeAxisMinute)
+            val gap = 16.sp.toPx()
+            val labelSleepY = if (abs(sleepY - wakeY) < gap) minOf(bottom, sleepY + gap / 2) else sleepY
+            val labelWakeY = if (abs(sleepY - wakeY) < gap) maxOf(top, wakeY - gap / 2) else wakeY
+            fun label(text: String, valueY: Float, labelY: Float, color: androidx.compose.ui.graphics.Color) {
+                drawLine(color.copy(alpha = 0.5f), Offset(x(last), valueY), Offset(right + 3.dp.toPx(), labelY), 1.dp.toPx())
+                labelPaint.color = color.toArgb()
+                drawContext.canvas.nativeCanvas.drawText(text, right + 5.dp.toPx(), labelY + labelPaint.textSize * 0.35f, labelPaint)
+            }
+            label("수면", sleepY, labelSleepY, primary)
+            label("기상", wakeY, labelWakeY, secondary)
         }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -218,12 +271,6 @@ private fun TrendCanvas(points: List<SleepTrendPoint>, days: Int, mode: TrendMod
         Text(if (mode == TrendMode.DURATION) "단위: 분" else "세로축: 시각", style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(periodEnd.format(trendDay), style = MaterialTheme.typography.labelSmall)
-    }
-    if (mode == TrendMode.CLOCK) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("● 취침 · 실선", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-            Text("● 기상 · 점선", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
-        }
     }
     points.getOrNull(selected)?.let { point ->
         Text(
@@ -246,12 +293,3 @@ private fun durationAxisLabel(minutes: Int): String = when {
     else -> "${minutes / 60}h${minutes % 60}"
 }
 
-private fun clockAxisLabel(axisMinute: Int): String {
-    val dayOffset = Math.floorDiv(axisMinute + 720, 1440)
-    val suffix = when {
-        dayOffset > 0 -> " +${dayOffset}일"
-        dayOffset < 0 -> " ${dayOffset}일"
-        else -> ""
-    }
-    return axisTime(axisMinute) + suffix
-}

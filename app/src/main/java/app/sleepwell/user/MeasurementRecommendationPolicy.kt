@@ -39,7 +39,8 @@ internal object MeasurementRecommendationPolicy {
         val extensionMinutes: Double,
         val napApplied: Boolean,
         val dataPreferenceApplied: Boolean,
-        val dataPreferredBed: ZonedDateTime?
+        val dataPreferredBed: ZonedDateTime?,
+        val jointRecommendation: Boolean = false
     )
 
     fun nightId(now: ZonedDateTime, usualWake: LocalTime): LocalDate {
@@ -66,8 +67,40 @@ internal object MeasurementRecommendationPolicy {
          * preference among candidates that already satisfy the wake and duration
          * constraints. This engineering rule is not a validated efficacy claim.
          */
-        dataPreferredBed: ZonedDateTime? = null
+        dataPreferredBed: ZonedDateTime? = null,
+        recommendBoth: Boolean = false,
+        latestWake: ZonedDateTime? = null
     ): Result {
+        if (recommendBoth) {
+            // Service policy v2: jointly select both times around the evidence-based sleep midpoint.
+            // +/-120 minutes and score weights are bounded engineering choices, not validated efficacy.
+            // Stored research forecasts and fixed-wake replay continue to use the original branch.
+            val centerMinute = positiveModulo(phaseMinutes + targetSleepMinutes / 2.0, 1440.0).roundToLong()
+            val center = wake.toLocalDate().atStartOfDay(wake.zone)
+                .withHour((centerMinute % 1440 / 60).toInt()).withMinute((centerMinute % 60).toInt())
+            val wakeCandidates = (-120..120 step 5).map { center.plusMinutes(it.toLong()) }
+                .plus(listOfNotNull(latestWake))
+                .filter { it.isAfter(now) && (latestWake == null || !it.isAfter(latestWake)) }
+                .distinctBy { it.toInstant() }
+            fun fixed(candidate: ZonedDateTime) = plan(now, candidate, targetSleepMinutes,
+                latencyMinutes, phaseMinutes, personalizedMode, evidenceAdequate, usualBed,
+                usualWake, recentCompleteDiaries, completedNap, dataPreferredBed)
+            val options = wakeCandidates.map(::fixed)
+            val feasible = options.filter { it.feasible }
+            val chosen = feasible.maxByOrNull { option ->
+                val onset = option.bed.plusSeconds((latencyMinutes * 60).roundToLong())
+                val midpoint = onset.plusSeconds(Duration.between(onset, option.wake).seconds / 2)
+                val phaseDistanceHours = abs(clockDelta(clockMinutes(midpoint), phaseMinutes)) / 60.0
+                val s = advance(option.currentS, false, Duration.between(now, option.bed).seconds / 3600.0)
+                val c = 0.15 * cos(2 * PI * (clockMinutes(option.bed) - phaseMinutes) / 1440.0)
+                val dataPenalty = dataPreferredBed?.let {
+                    0.08 * minOf(abs(Duration.between(option.bed, it).seconds / 3600.0), 4.0)
+                } ?: 0.0
+                s + c - 0.25 * phaseDistanceHours - dataPenalty
+            } ?: fixed(latestWake ?: center.plusMinutes(120).takeIf { it.isAfter(now) } ?: now)
+            return chosen.copy(jointRecommendation = true)
+        }
+
         val recent = recentCompleteDiaries.filter { row ->
             val age = Duration.between(row.wake, now)
             !age.isNegative && age <= Duration.ofDays(7)

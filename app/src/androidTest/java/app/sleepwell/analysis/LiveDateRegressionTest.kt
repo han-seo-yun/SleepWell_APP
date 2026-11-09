@@ -105,62 +105,6 @@ class LiveDateRegressionTest : InstrumentationTestCase() {
         )
     }
 
-    fun testRebasedAssetsProduceCurrentFusionRecommendationThroughLiveRunner() {
-        val now = ZonedDateTime.of(2026, 11, 3, 20, 0, 0, 0, seoul).toInstant()
-        val assets = instrumentation.targetContext.assets
-        val previousProfile = NextNightModel.profile
-        val previousSurveyDays = NextNightModel.surveyDays
-        NextNightModel.install { path -> assets.open(path).use { it.readBytes() } }
-        try {
-            listOf("regular", "irregular", "new").forEach { fixture ->
-                val sleep = assets.open("demo_sleep_$fixture.csv").bufferedReader().use { it.readText() }
-                val survey = assets.open("demo_survey_$fixture.csv").bufferedReader().use { it.readText() }
-                val (rebasedSleep, rebasedSurvey) = DemoDates.rebase(sleep, survey, now)
-                NextNightModel.surveyDays = SurveyCsv.parse(rebasedSurvey).days
-                val direct = DirectInputParser.parse(
-                    DirectInputForm(targetWakeText = "07:30"),
-                    nowMs = now.toEpochMilli()
-                ).input
-                val file = File.createTempFile("live-$fixture-", ".csv", instrumentation.targetContext.cacheDir)
-                try {
-                    file.writeText(rebasedSleep)
-                    val raw = file.inputStream().use { input ->
-                        SleepAnalysisPipeline.analyze(
-                            input = input,
-                            directInput = direct,
-                            referenceTimeMs = now.toEpochMilli()
-                        )
-                    }
-                    assertTrue("$fixture baseline failed: $raw", raw is HealthResult.Success)
-                    val baseline = (raw as HealthResult.Success).data
-                    val latestRecordDate = baseline.sleepRecords.maxOf { it.endMs }
-                        .let(Instant::ofEpochMilli).atZone(seoul).toLocalDate()
-                    val latestNightDate = NextNightModel.nightlyRecords(baseline.sleepRecords, direct)
-                        .maxOf { Instant.parse(it.wakeTime) }.atZone(seoul).toLocalDate()
-                    assertEquals("$fixture record date", now.atZone(seoul).toLocalDate(), latestRecordDate)
-                    assertEquals("$fixture night date", now.atZone(seoul).toLocalDate(), latestNightDate)
-
-                    val live = AnalysisRunner.runCurrent(file, baseline, direct, emptyMap(), now.toEpochMilli())
-                    assertNotNull("$fixture recommendation", live.recommendation)
-                    val recommendation = checkNotNull(live.recommendation)
-                    assertEquals("$fixture model", "fusion_cmi_mesa", recommendation.modelStatus)
-                    assertEquals("$fixture generatedAt", now.toEpochMilli(), recommendation.generatedAtMs)
-                    val bed = recommendation.recommendedBedTimeMs ?: Long.MAX_VALUE
-                    val wake = recommendation.recommendedWakeTimeMs ?: Long.MIN_VALUE
-                    val minutes = recommendation.recommendedSleepMin ?: 0.0
-                    assertTrue("$fixture positive duration", minutes > 0.0)
-                    assertTrue("$fixture ordered times", wake > bed)
-                    assertEquals("$fixture duration consistency", (wake - bed) / 60_000.0, minutes, 0.01)
-                    assertTrue("$fixture wake respects target", wake <= (direct?.targetWakeMs ?: Long.MIN_VALUE))
-                } finally {
-                    file.delete()
-                }
-            }
-        } finally {
-            NextNightModel.profile = previousProfile
-            NextNightModel.surveyDays = previousSurveyDays
-        }
-    }
 
     private fun sleepRows(csv: String): List<Pair<Instant, Instant>> = csv.lineSequence()
         .drop(1)
