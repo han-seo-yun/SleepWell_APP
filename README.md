@@ -2,10 +2,10 @@
 
 Android 수면 기록·개인화 수면 계획 앱 **SleepWell**입니다. Samsung Health가 Health Connect에 공유한 수면 기록을 누적하고, 사용자의 수면 이력 특징과 Two-Process 생리 모델 특징을 기기 내 HGB 하이브리드 예측에 사용합니다.
 
-**UI 디자인 및 모델 개발: [Han Seoyun (han-seo-yun), ](https://github.com/han-seo-yun)**
-**백엔드: [Choi Sobin (soin7563-ops), ](https://github.com/soin7563-ops)**
-**프론트엔드: [Jeong Chaeyoon (iuniion3287-web), ](https://github.com/iuniion3287-web)**
-**베타 테스트: [Shin Hyeji (Hyeji-Shin-lab), ](https://github.com/Hyeji-Shin-lab)**
+- **UI 디자인 및 모델 개발: [Han Seoyun (han-seo-yun), ](https://github.com/han-seo-yun)**
+- **백엔드: [Choi Sobin (soin7563-ops), ](https://github.com/soin7563-ops)**
+- **프론트엔드: [Jeong Chaeyoon (iuniion3287-web), ](https://github.com/iuniion3287-web)**
+- **베타 테스트: [Shin Hyeji (Hyeji-Shin-lab), ](https://github.com/Hyeji-Shin-lab)**
 
 패키지 `app.sleepwell.offlinehgb` · 버전 **0.8.9** (17) · 변경일 `2026-11-08`
 
